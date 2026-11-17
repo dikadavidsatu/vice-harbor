@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Bay — Open-World Crime</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #14101c; font-family: 'Segoe UI', system-ui, sans-serif; color: #f2f2f5; }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .hidden { display: none !important; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  .panel { background: rgba(12, 10, 22, 0.62); border: 1px solid rgba(255, 210, 59, 0.25); border-radius: 10px; backdrop-filter: blur(2px); }
+  #hud-top-left { position: absolute; top: 14px; left: 14px; padding: 10px 14px; min-width: 190px; }
+  #hud-cash { font-size: 26px; font-weight: 800; color: #7dff9a; letter-spacing: 1px; }
+  #hud-health { margin-top: 6px; height: 10px; background: #33222a; border-radius: 5px; overflow: hidden; }
+  #hud-health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff4d6d, #ff8a5c); transition: width 0.2s; }
+  #hud-health-label { font-size: 11px; color: #ffb3c0; margin-top: 3px; letter-spacing: 2px; }
+  #hud-stars { position: absolute; top: 14px; right: 16px; font-size: 30px; letter-spacing: 4px; color: #55555f; text-shadow: 0 0 8px rgba(0,0,0,0.6); }
+  #hud-stars.hot { color: #ffd23b; text-shadow: 0 0 14px rgba(255, 210, 59, 0.9); }
+  #hud-objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 9px 18px; font-size: 15px; font-weight: 600; color: #ffe9a0; max-width: 46vw; text-align: center; }
+  #hud-speed { position: absolute; bottom: 18px; right: 18px; padding: 10px 16px; font-size: 24px; font-weight: 800; color: #fff; }
+  #minimap { position: absolute; bottom: 16px; left: 16px; width: 220px; height: 220px; border: 2px solid rgba(255, 210, 59, 0.45); border-radius: 8px; background: #101018; }
+  #hud-mission-btn { position: absolute; bottom: 252px; left: 16px; pointer-events: auto; cursor: pointer; padding: 10px 16px; font-size: 15px; font-weight: 700; color: #14101c; background: #ffd23b; border: none; border-radius: 8px; }
+  #dialog { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: min(620px, 80vw); padding: 14px 18px; }
+  #dialog-speaker { color: #ffd23b; font-weight: 800; letter-spacing: 1px; font-size: 13px; text-transform: uppercase; }
+  #dialog-text { margin-top: 4px; font-size: 16px; line-height: 1.45; }
+  #toast { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 15px; font-weight: 600; color: #fff; background: rgba(12, 10, 22, 0.75); border-radius: 8px; }
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); pointer-events: none; }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,0.9); box-shadow: 0 0 4px rgba(0,0,0,0.8); }
+  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after { top: 10px; left: 0; width: 22px; height: 2px; }
+  .screen { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: radial-gradient(ellipse at 50% 120%, rgba(255, 120, 60, 0.35), rgba(10, 8, 18, 0.88) 65%); }
+  .screen h1 { font-size: 84px; font-weight: 900; letter-spacing: 10px; color: #ffd23b; text-shadow: 0 0 30px rgba(255, 140, 40, 0.8), 0 4px 0 #7a2a00; }
+  .screen h2 { font-size: 20px; font-weight: 400; color: #ffd9a0; margin-top: 6px; letter-spacing: 2px; }
+  .screen p.story { max-width: 560px; margin: 18px 0 6px; font-size: 16px; line-height: 1.55; color: #e8e2f2; }
+  .btn { pointer-events: auto; cursor: pointer; margin-top: 22px; padding: 14px 42px; font-size: 19px; font-weight: 800; letter-spacing: 2px; color: #14101c; background: linear-gradient(180deg, #ffe066, #ffb52e); border: none; border-radius: 10px; box-shadow: 0 4px 24px rgba(255, 170, 40, 0.5); }
+  .btn.secondary { background: rgba(255,255,255,0.12); color: #fff; box-shadow: none; border: 1px solid rgba(255,255,255,0.35); font-size: 16px; padding: 11px 30px; }
+  #start-controls { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 26px; text-align: left; font-size: 14px; color: #cfc8de; }
+  .ctl { display: flex; gap: 10px; align-items: baseline; }
+  .key { display: inline-block; min-width: 74px; font-weight: 700; color: #ffd23b; }
+  #start-save-note { margin-top: 12px; color: #7dff9a; font-size: 14px; }
+  #screen-wasted { background: rgba(20, 0, 0, 0.55); }
+  #screen-wasted h1 { color: #ff3b4d; text-shadow: 0 0 30px rgba(255, 40, 60, 0.8); }
+  #screen-complete h1 { font-size: 56px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="hud-top-left" class="panel">
+    <div id="hud-cash">$250</div>
+    <div id="hud-health"><div id="hud-health-fill"></div></div>
+    <div id="hud-health-label">HEALTH</div>
+  </div>
+  <div id="hud-stars">☆☆☆☆☆</div>
+  <div id="hud-objective" class="panel">Neon Bay</div>
+  <div id="hud-speed" class="panel hidden">0 km/h</div>
+  <div id="crosshair" class="hidden"></div>
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <button id="hud-mission-btn" class="hidden">▶ MULAI MISI 5</button>
+  <div id="dialog" class="panel hidden">
+    <div id="dialog-speaker">Mara Voss</div>
+    <div id="dialog-text"></div>
+  </div>
+  <div id="toast" class="hidden"></div>
+</div>
+
+<div id="screen-start" class="screen">
+  <h1 id="game-title">NEON BAY</h1>
+  <h2 id="game-tagline">A sun-soaked bay city. One driver. Five jobs. No way back.</h2>
+  <p class="story">Kamu datang ke Neon Bay dengan jaket pinjaman dan mobil cepat. Mara Voss yang mengatur semua kerjaan di teluk ini. Selesaikan lima misinya — dari paket dermaga sampai pelarian lima bintang — dan namamu jadi legenda.</p>
+  <button id="btn-start" class="btn">▶ MULAI</button>
+  <button id="btn-continue" class="btn secondary hidden">LANJUTKAN SAVE</button>
+  <div id="start-save-note"></div>
+  <div id="start-controls"></div>
+</div>
+
+<div id="screen-wasted" class="screen hidden">
+  <h1>WASTED</h1>
+  <h2>Kamu pingsan. Ambulans membawamu ke rumah sakit…</h2>
+</div>
+
+<div id="screen-complete" class="screen hidden">
+  <h1>LEGENDA TELUK</h1>
+  <h2>Lima misi. Lima bintang. Satu nama yang tak terlupakan.</h2>
+  <p class="story">Kamu lolos dari seluruh kota. Mulai hari ini, semua kru di Neon Bay menyebut namamu dengan hormat — dan sedikit takut.</p>
+  <button id="btn-complete" class="btn">JELAJAHI KOTA</button>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
