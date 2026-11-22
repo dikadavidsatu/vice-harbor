@@ -7,6 +7,7 @@ export class Input {
     this.pressed = new Set();
     this.mouseDX = 0;
     this.mouseDY = 0;
+    this.wheelDelta = 0;
     this.clicks = [];
     this.locked = false;
     this.canvas = canvas;
@@ -15,8 +16,13 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      if (e.code === 'Space') e.preventDefault();
+      // keep the page itself from scrolling away under the game
+      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
+    window.addEventListener('wheel', (e) => {
+      // accumulated, then drained once per frame by whoever owns the camera
+      this.wheelDelta += Math.sign(e.deltaY || 0);
+    }, { passive: true });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
 
@@ -71,6 +77,11 @@ export class Input {
     this.mouseDY = 0;
     return { dx, dy };
   }
+  consumeWheel() {
+    const w = this.wheelDelta;
+    this.wheelDelta = 0;
+    return w;
+  }
   consumeClicks() {
     const out = this.clicks;
     this.clicks = [];
@@ -81,5 +92,6 @@ export class Input {
     this.clicks = [];
     this.mouseDX = 0;
     this.mouseDY = 0;
+    this.wheelDelta = 0;
   }
 }

@@ -1,7 +1,7 @@
 // The player: walks and drives, punches and shoots, and carries the camera.
 // Also owns health, cash, death/respawn, and entering or stealing cars.
 import * as THREE from 'three';
-import { CAR_TUNE, PLAYER_TUNE, WORLD } from './config.js';
+import { CAR_TUNE, PLAYER_TUNE, WORLD, districtAt } from './config.js';
 import { collideSolids } from './city.js';
 
 function buildPlayerMesh() {
@@ -34,6 +34,7 @@ export class Player {
     this.heading = Math.PI;
     this.camYaw = 0;
     this.camPitch = 0.32;
+    this.camDistMul = 1; // mouse-wheel camera distance, 0.7..1.6
     this.onFoot = true;
     this.car = null;
     this.cash = 250;
@@ -45,6 +46,8 @@ export class Player {
     this.autoWp = 0;
     this.lastShotAt = -99;
     this.lastPunchAt = -99;
+    this.lastHornAt = -99;
+    this.districtId = null; // district the player is currently standing in
     this.walkBob = 0;
     this.mesh = buildPlayerMesh();
     this.mesh.position.copy(this.pos);
@@ -82,6 +85,7 @@ export class Player {
     this.consumePressedKeys();
     if (this.onFoot) this.updateOnFoot(dt);
     else this.updateDriving(dt);
+    this.updateDistrict();
     this.updateCamera(dt);
     if (this.tracerTimer > 0) {
       this.tracerTimer -= dt;
@@ -92,18 +96,61 @@ export class Player {
     }
     // engine sound follows the car
     G.audio.setEngine(this.car ? Math.abs(this.car.speed) / CAR_TUNE.maxSpeed : 0, !!this.car);
+    // surf fades in as the player nears the beach and the pier
+    const shore = Math.max(0, Math.min(1, (this.effectivePos().x - 170) / 130));
+    G.audio.setAmbience(shore);
   }
 
   handleMouse() {
     const { dx, dy } = this.G.input.consumeMouse();
     this.camYaw -= dx * 0.0028;
     this.camPitch = Math.max(0.08, Math.min(1.0, this.camPitch + dy * 0.0022));
+    const wheel = this.G.input.consumeWheel();
+    if (wheel) {
+      this.camDistMul = Math.max(0.7, Math.min(1.6, this.camDistMul + wheel * 0.12));
+    }
+  }
+
+  updateDistrict() {
+    // Crossing into a new quarter earns a banner and a soft chime; leaving
+    // the districts for the old grid just clears the current one silently.
+    const p = this.effectivePos();
+    const d = districtAt(p.x, p.z);
+    const id = d ? d.id : null;
+    if (id === this.districtId) return;
+    this.districtId = id;
+    if (d && this.G.mode === 'playing' && !this.dead) {
+      this.G.hud.showDistrict(d);
+      this.G.audio.districtChime();
+    }
+  }
+
+  horn() {
+    if (this.onFoot || !this.car || this.dead) return;
+    if (this.G.time - this.lastHornAt < 0.35) return;
+    this.lastHornAt = this.G.time;
+    this.G.audio.horn();
+    // a horn blast startles whoever is standing in front of the car
+    const fx = Math.sin(this.car.heading);
+    const fz = Math.cos(this.car.heading);
+    for (const ped of this.G.pedestrians.list) {
+      if (ped.state === 'down' || ped.state === 'stand') continue;
+      const dx = ped.pos.x - this.car.pos.x;
+      const dz = ped.pos.z - this.car.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 7 && (dx * fx + dz * fz) / Math.max(0.01, d) > 0.4) {
+        ped.state = 'flee';
+        ped.fleeTimer = 1.2;
+        ped.heading = Math.atan2(dx, dz);
+      }
+    }
   }
 
   consumePressedKeys() {
     const input = this.G.input;
     if (input.consumePressed('KeyE')) this.toggleCar();
     if (input.consumePressed('KeyF')) this.punch();
+    if (input.consumePressed('KeyH')) this.horn();
     if (input.consumePressed('KeyM')) this.G.missions.tryStartNext();
     if (input.consumePressed('KeyP')) this.G.togglePause();
     for (const click of input.consumeClicks()) {
@@ -169,9 +216,12 @@ export class Player {
       throttle = 1;
       steer = this.autoSteer();
     }
-    if (throttle > 0) car.speed += CAR_TUNE.accel * dt;
+    // each vehicle kind accelerates at its own rate: a muscle car leaps, a
+    // loaded van lumbers, and the taxi sits sensibly in between
+    const accel = car.accel ?? CAR_TUNE.accel;
+    if (throttle > 0) car.speed += accel * dt;
     else if (throttle < 0) {
-      car.speed -= (car.speed > 0.5 ? CAR_TUNE.brake : CAR_TUNE.accel * 0.7) * dt;
+      car.speed -= (car.speed > 0.5 ? CAR_TUNE.brake : accel * 0.7) * dt;
     } else {
       car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 6 * dt);
     }
@@ -240,7 +290,7 @@ export class Player {
       G.camera.lookAt(40, 0, 0);
       return;
     }
-    const dist = this.onFoot ? 7.5 : 11;
+    const dist = (this.onFoot ? 7.5 : 11) * this.camDistMul;
     const height = 2.6 + this.camPitch * 4.5;
     const back = this.onFoot ? this.camYaw : this.car ? this.car.heading + Math.PI : this.camYaw;
     const cx = target.x + Math.sin(back) * dist;
@@ -289,6 +339,7 @@ export class Player {
     }
     car.wasParked = false;
     this.G.missions.onEnterCar(car);
+    if (this.G.activities) this.G.activities.onEnterCar(car);
   }
 
   exitCar() {
@@ -305,6 +356,7 @@ export class Player {
     this.mesh.visible = true;
     this.mesh.position.copy(this.pos);
     this.camYaw = car.heading + Math.PI;
+    if (this.G.activities) this.G.activities.onExitCar();
   }
 
   punch() {

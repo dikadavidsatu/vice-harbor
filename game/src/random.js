@@ -26,4 +26,29 @@ export class Rng {
   chance(p) {
     return this.next() < p;
   }
+  weighted(pairs) {
+    // pairs: [[value, weight], ...] — one roll, proportional to weight
+    let total = 0;
+    for (const [, w] of pairs) total += w;
+    let roll = this.next() * total;
+    for (const [value, w] of pairs) {
+      roll -= w;
+      if (roll <= 0) return value;
+    }
+    return pairs[pairs.length - 1][0];
+  }
+  shuffle(list) {
+    // Fisher–Yates with the seeded stream, so a shuffled deck replays
+    const out = list.slice();
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    return out;
+  }
+  sign() {
+    return this.next() < 0.5 ? -1 : 1;
+  }
 }

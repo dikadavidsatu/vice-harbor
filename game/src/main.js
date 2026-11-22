@@ -11,9 +11,10 @@ import { Player } from './player.js';
 import { Missions } from './missions.js';
 import { Police } from './police.js';
 import { HUD } from './hud.js';
+import { Activities } from './activities.js';
 import { loadSave, writeSave } from './save.js';
 import { applyShot } from './shots.js';
-import { PALETTE, ROADS, STORY } from './config.js';
+import { PALETTE, ROADS, STORY, MISSIONS, FINAL_MISSION_INDEX } from './config.js';
 
 const params = new URLSearchParams(window.location.search);
 const seed = parseInt(params.get('seed') || '7', 10) || 7;
@@ -71,6 +72,7 @@ const G = {
   missions: null,
   police: null,
   hud: null,
+  activities: null,
   enemies: [],
   mode: 'menu',
   paused: false,
@@ -79,6 +81,7 @@ const G = {
   lowfx,
   shotReadyAt: null,
   saveTimer: 0,
+  nextPedLineAt: 0,
   // default auto-drive route: a rectangle loop around the city grid
   autoWaypoints: [[0, 180], [180, 180], [180, -180], [-180, -180], [-180, 180], [0, 180]],
 };
@@ -87,10 +90,11 @@ G.city = buildCity(G);
 G.vehicles.cars.push(...spawnTraffic(G, lowfx ? 10 : 14));
 G.vehicles.cars.push(...spawnParked(G));
 G.pedestrians = new Pedestrians(G);
-G.pedestrians.spawn(lowfx ? 14 : 22);
+G.pedestrians.spawn(lowfx ? 16 : 26);
 G.player = new Player(G);
 G.missions = new Missions(G);
 G.police = new Police(G);
+G.activities = new Activities(G);
 G.hud = new HUD(G);
 
 G.saveGame = () => {
@@ -100,6 +104,7 @@ G.saveGame = () => {
     stepIdx: G.missions.stepIdx,
     pos: G.player.effectivePos(),
     health: G.player.health,
+    activities: G.activities.state(),
   });
 };
 
@@ -112,11 +117,13 @@ G.startGame = (continueSave) => {
       G.player.health = save.health || 100;
       G.player.pos.set(save.pos[0], 0, save.pos[1]);
       G.player.mesh.position.copy(G.player.pos);
-      G.missions.index = Math.min(save.missionIndex, 5);
+      G.missions.index = Math.min(save.missionIndex, MISSIONS.length);
       G.missions.stepIdx = save.stepIdx || 0;
-      G.missions.available = G.missions.index === 4;
-      if (G.missions.index === 4) G.hud.showMissionButton(true);
-      if (G.missions.index >= 5) G.hud.showComplete(false);
+      G.missions.available = G.missions.index === FINAL_MISSION_INDEX;
+      if (G.missions.isFinale) G.hud.showMissionButton(true);
+      if (G.missions.index >= MISSIONS.length) G.hud.showComplete(false);
+      if (G.missions.active) G.missions.armStep();
+      if (save.activities) G.activities.restore(save.activities);
       G.hud.setObjective(G.missions.objectiveText());
       G.hud.toast('Save dimuat. Selamat datang kembali di Neon Bay.');
     }
@@ -171,6 +178,7 @@ function loop() {
     }
     G.pedestrians.update(dt);
     G.missions.update(dt);
+    G.activities.update(dt);
     G.police.update(dt);
     G.saveTimer += dt;
     if (G.saveTimer > 10) {

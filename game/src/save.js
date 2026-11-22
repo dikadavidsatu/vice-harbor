@@ -1,4 +1,8 @@
-// One JSON blob in localStorage: cash, mission progress, position, health.
+// One JSON blob in localStorage: cash, mission progress, position, health,
+// and the side-activity ledger (which neon shells are already collected,
+// how many taxi fares are done, and the street-race best time). The blob
+// stays version 1: older saves simply have no activities field, and the
+// loader treats that as a fresh ledger rather than a corrupt save.
 import { SAVE_KEY } from './config.js';
 
 export function loadSave() {
@@ -22,6 +26,7 @@ export function writeSave(state) {
       stepIdx: state.stepIdx || 0,
       pos: [Math.round(state.pos.x * 10) / 10, Math.round(state.pos.z * 10) / 10],
       health: Math.round(state.health),
+      activities: state.activities || null,
       savedAt: Date.now(),
     };
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(blob));

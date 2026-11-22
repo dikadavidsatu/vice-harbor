@@ -14,6 +14,7 @@ import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
+import { DISTRICTS, MISSIONS } from './game/src/config.js';
 
 const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -40,6 +41,29 @@ function handIn() {
     game_path_max_bytes: 1000,
   });
   writeFileSync(join(outputDir, 'dossier.json'), dossier);
+
+  // A small deterministic manifest of what the game contains, derived from
+  // the game's own data module (never from the clock or the filesystem
+  // order), so two runs byte-match. Keys are written in a fixed order, and
+  // every list follows the order of the data it came from.
+  const stepKinds = new Set();
+  let totalSteps = 0;
+  for (const m of MISSIONS) {
+    totalSteps += m.steps.length;
+    for (const s of m.steps) stepKinds.add(s.kind);
+  }
+  const summary = {
+    game: 'Neon Bay',
+    missions: MISSIONS.length,
+    mission_titles: MISSIONS.map((m) => m.title),
+    total_steps: totalSteps,
+    step_kinds: [...stepKinds].sort(),
+    finale: MISSIONS[MISSIONS.length - 1].title,
+    districts: DISTRICTS.map((d) => d.name),
+    district_ids: DISTRICTS.map((d) => d.id),
+    total_reward: MISSIONS.reduce((sum, m) => sum + m.reward, 0),
+  };
+  writeFileSync(join(outputDir, 'game-summary.json'), JSON.stringify(summary, null, 2) + '\n');
 }
 
 handIn();

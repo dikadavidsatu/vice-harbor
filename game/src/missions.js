@@ -1,7 +1,12 @@
-// The story: five jobs in order, with dialogue, a 3D beacon, minimap markers
-// and cash rewards. Also owns the armed enemies of the warehouse defence.
+// The story: ten jobs in order, with dialogue, a 3D beacon, minimap markers
+// and cash rewards. Step kinds cover pickups and deliveries, a stolen-car
+// drop, a tail, warehouse and harbour defences, timed courier runs across
+// the districts, a checkpoint race through Pasar Senja, a crate hunt spread
+// over the whole bay, and a VIP pickup that has to be done in a car. The
+// finale is gated: it waits for the player to start it, and the police pin
+// the heat while it runs.
 import * as THREE from 'three';
-import { MISSIONS, DIALOG_MS, STORY, WANTED } from './config.js';
+import { MISSIONS, DIALOG_MS, STORY, WANTED, FINAL_MISSION_INDEX } from './config.js';
 
 function buildEnemyMesh() {
   const g = new THREE.Group();
@@ -26,9 +31,10 @@ function buildEnemyMesh() {
 }
 
 export class Enemy {
-  constructor(G, x, z) {
+  constructor(G, x, z, guardPlace) {
     this.G = G;
     this.pos = new THREE.Vector3(x, 0, z);
+    this.guardPlace = guardPlace || G.city.places.warehouse;
     this.health = 100;
     this.dead = false;
     this.shootTimer = G.rng.float(0.5, 1.5);
@@ -56,8 +62,8 @@ export class Enemy {
     const dx = target.x - this.pos.x;
     const dz = target.z - this.pos.z;
     const dist = Math.hypot(dx, dz);
-    const guard = G.city.places.warehouse;
-    // hold near the warehouse, advance on the player when close
+    const guard = this.guardPlace;
+    // hold near the defended place, advance on the player when close
     if (dist < 34) {
       const speed = 3.4;
       this.pos.x += (dx / dist) * speed * dt;
@@ -90,15 +96,19 @@ export class Enemy {
 export class Missions {
   constructor(G) {
     this.G = G;
-    this.index = 0; // next mission to play; 5 = story done
+    this.index = 0; // next mission to play; MISSIONS.length = story done
     this.stepIdx = 0;
-    this.available = true; // mission 5 waits for the player to start it
+    this.available = true; // the finale waits for the player to start it
     this.tailProgress = 0;
     this.tailSeen = 0;
     this.wave = 0;
     this.waveDelay = 0;
     this.targetCar = null;
     this.stolenCar = null;
+    this.stepTimer = 0; // seconds left on a timedGoto step
+    this.raceIdx = 0; // next checkpoint of a race step
+    this.collected = new Set(); // place keys already picked up on a collect step
+    this.crateMeshes = new Map(); // place key -> glowing crate mesh
     this.beacon = new THREE.Mesh(
       new THREE.CylinderGeometry(2.2, 2.2, 30, 16, 1, true),
       new THREE.MeshBasicMaterial({
@@ -129,19 +139,25 @@ export class Missions {
     const d = this.def;
     return d ? d.steps[this.stepIdx] : null;
   }
+  get isFinale() {
+    return this.index === FINAL_MISSION_INDEX;
+  }
   get active() {
-    return this.def && (this.index < 4 || !this.available);
+    return this.def && (!this.isFinale || !this.available);
   }
 
   objectiveText() {
     if (this.index >= MISSIONS.length) return 'Legenda Neon Bay — cerita selesai. Jelajahi kota sesukamu.';
-    if (this.index === 4 && this.available) return 'Misi 5 tersedia — tekan M atau tombol MISI untuk memulai Pelarian Teluk.';
+    if (this.isFinale && this.available) return `Misi ${MISSIONS.length} tersedia — tekan M atau tombol MISI untuk memulai Pelarian Teluk.`;
     const d = this.def;
     const s = this.step;
     if (!s) return d.title;
     let text = s.text;
-    if (s.kind === 'defend') text += `gelombang ${this.wave + 1}/3`;
+    if (s.kind === 'defend') text += `gelombang ${this.wave + 1}/${s.waves.length}`;
     if (s.kind === 'tail') text += ` (${Math.floor(this.tailProgress)}/20 dtk)`;
+    if (s.kind === 'timedGoto') text += ` — sisa ${Math.max(0, Math.ceil(this.stepTimer))} dtk`;
+    if (s.kind === 'race') text += `${this.raceIdx + 1}/${s.checkpoints.length}`;
+    if (s.kind === 'collect') text += `${this.collected.size}/${s.places.length}`;
     return `${d.title}: ${text}`;
   }
 
@@ -156,7 +172,11 @@ export class Missions {
     if (s.kind === 'tail') {
       return this.targetCar ? this.targetCar.pos : null;
     }
-    if (s.kind === 'defend') return G.city.places.warehouse;
+    if (s.kind === 'race') return G.city.places[s.checkpoints[this.raceIdx]] || null;
+    if (s.kind === 'collect') {
+      const next = s.places.find((k) => !this.collected.has(k));
+      return next ? G.city.places[next] : null;
+    }
     if (s.place) return G.city.places[s.place];
     return null;
   }
@@ -172,14 +192,17 @@ export class Missions {
     this.wave = 0;
     this.waveDelay = 0;
     this.stolenCar = null;
+    this.raceIdx = 0;
+    this.collected = new Set();
     const d = MISSIONS[i];
-    // clear old enemies
+    // clear old enemies and crates before arming the first step, so a
+    // defend wave or a set of crates is spawned exactly once
     for (const e of G.enemies) e.dispose();
     G.enemies.length = 0;
-    if (d.steps[0].kind === 'defend') {
-      this.spawnWave(0);
-    }
-    if (d.steps[0].kind === 'tail') {
+    this.clearCrates();
+    this.armStep();
+    const first = d.steps[0];
+    if (first.kind === 'tail') {
       this.targetCar = G.vehicles.cars.find((c) => c.marker === 'target');
       if (this.targetCar) {
         this.targetCar.parked = false;
@@ -187,7 +210,7 @@ export class Missions {
         this.targetCar.pickNextTarget();
       }
     }
-    if (i === 4) {
+    if (this.isFinale) {
       G.police.setHeat(WANTED.stars[5]);
       G.hud.toast('LIMA BINTANG — seluruh kota memburumu!');
     }
@@ -196,33 +219,70 @@ export class Missions {
     G.saveGame();
   }
 
+  armStep() {
+    // per-step state that has to be fresh whenever a step becomes current
+    const s = this.step;
+    if (!s) return;
+    if (s.kind === 'timedGoto') this.stepTimer = s.timeLimit;
+    if (s.kind === 'race') this.raceIdx = 0;
+    if (s.kind === 'collect') {
+      this.collected = new Set();
+      this.spawnCrates(s);
+    }
+    if (s.kind === 'defend' && this.G.enemies.length === 0) this.spawnWave(this.wave);
+  }
+
   tryStartNext() {
-    if (this.index === 4 && this.available) {
-      this.startMission(4);
+    if (this.isFinale && this.available) {
+      this.startMission(FINAL_MISSION_INDEX);
     }
   }
 
   onEnterCar(car) {
     const s = this.step;
     if (!s) return;
-    if (this.index === 1 && s.kind === 'stealCar' && car.marker === s.marker) {
+    if (s.kind === 'stealCar' && car.marker === s.marker) {
       this.stolenCar = car;
       this.stepIdx = 1;
+      this.armStep();
       this.G.audio.pickup();
-      this.G.hud.toast('Sedan didapat — antar ke bengkel Riko!');
+      this.G.hud.toast('Mobil didapat — antar ke tujuannya!');
       this.G.hud.setObjective(this.objectiveText());
       this.G.saveGame();
     }
   }
 
+  spawnCrates(step) {
+    this.clearCrates();
+    const G = this.G;
+    for (const key of step.places) {
+      const place = G.city.places[key];
+      if (!place) continue;
+      const crate = new THREE.Mesh(
+        new THREE.BoxGeometry(1.3, 1.3, 1.3),
+        new THREE.MeshLambertMaterial({ color: 0xffd23b, emissive: 0x997711 }),
+      );
+      crate.position.set(place.x, 0.9, place.z);
+      G.scene.add(crate);
+      this.crateMeshes.set(key, crate);
+    }
+  }
+
+  clearCrates() {
+    for (const mesh of this.crateMeshes.values()) this.G.scene.remove(mesh);
+    this.crateMeshes.clear();
+  }
+
   spawnWave(w) {
     const G = this.G;
-    const guard = G.city.places.warehouse;
-    const count = MISSIONS[3].steps[0].waves[w];
+    const s = this.step;
+    if (!s || s.kind !== 'defend') return;
+    const guard = G.city.places[s.place];
+    const count = s.waves[w];
     for (let i = 0; i < count; i++) {
       const a = G.rng.float(0, Math.PI * 2);
       const r = G.rng.float(16, 30);
-      G.enemies.push(new Enemy(G, guard.x + Math.sin(a) * r, guard.z + Math.cos(a) * r));
+      G.enemies.push(new Enemy(G, guard.x + Math.sin(a) * r, guard.z + Math.cos(a) * r, guard));
     }
     this.wave = w;
     G.hud.toast(`Gelombang ${w + 1} datang!`);
@@ -237,22 +297,31 @@ export class Missions {
     }
     const d = this.def;
     const s = this.step;
-    if (d && s && !(this.index === 4 && this.available)) {
+    if (d && s && this.active) {
       const p = G.player.effectivePos();
       if (s.kind === 'goto') {
         const place = G.city.places[s.place];
         if (Math.hypot(p.x - place.x, p.z - place.z) < s.radius) this.advanceStep();
+      } else if (s.kind === 'driveTo') {
+        const place = G.city.places[s.place];
+        if (!G.player.onFoot && Math.hypot(p.x - place.x, p.z - place.z) < s.radius) this.advanceStep();
+      } else if (s.kind === 'timedGoto') {
+        this.updateTimedGoto(dt, s, p);
       } else if (s.kind === 'deliverCar') {
         const place = G.city.places[s.place];
         if (G.player.car === this.stolenCar && Math.hypot(p.x - place.x, p.z - place.z) < s.radius) {
           this.advanceStep();
         }
+      } else if (s.kind === 'race') {
+        this.updateRace(s, p);
+      } else if (s.kind === 'collect') {
+        this.updateCollect(s, p);
       } else if (s.kind === 'tail') {
         this.updateTail(dt);
       } else if (s.kind === 'defend') {
         const alive = G.enemies.some((e) => !e.dead);
         if (!alive) {
-          if (this.wave < 2) {
+          if (this.wave < s.waves.length - 1) {
             this.waveDelay += dt;
             if (this.waveDelay > 1.5) {
               this.waveDelay = 0;
@@ -265,7 +334,69 @@ export class Missions {
       }
     }
     for (const e of G.enemies) e.update(dt);
+    // crates idle-spin so they read as pickups from a distance
+    for (const mesh of this.crateMeshes.values()) {
+      mesh.rotation.y += dt * 1.4;
+      mesh.position.y = 0.9 + Math.sin(G.time * 2.2) * 0.12;
+    }
     this.updateBeacon(dt);
+  }
+
+  updateTimedGoto(dt, s, p) {
+    const G = this.G;
+    const place = G.city.places[s.place];
+    if (Math.hypot(p.x - place.x, p.z - place.z) < s.radius) {
+      this.advanceStep();
+      return;
+    }
+    this.stepTimer -= dt;
+    G.hud.setObjective(this.objectiveText());
+    if (this.stepTimer <= 0) {
+      // late is not fatal — Mara is annoyed, the clock restarts, pride hurts
+      this.stepTimer = s.timeLimit;
+      G.hud.toast('Terlambat! Mara mengulang jamnya — jangan sampai kelewatan lagi.');
+      G.hud.showDialog(STORY.fixer, 'Mara Voss: "Jam tidak menunggu sopir lambat. Ulangi, lebih cepat."', 3500);
+    }
+  }
+
+  updateRace(s, p) {
+    const G = this.G;
+    if (G.player.onFoot) return; // gates only count from behind a wheel
+    const gate = G.city.places[s.checkpoints[this.raceIdx]];
+    if (!gate) return;
+    if (Math.hypot(p.x - gate.x, p.z - gate.z) < s.radius) {
+      this.raceIdx++;
+      G.audio.pickup();
+      if (this.raceIdx >= s.checkpoints.length) {
+        this.advanceStep();
+      } else {
+        G.hud.toast(`Gerbang ${this.raceIdx}/${s.checkpoints.length} — terus!`);
+        G.hud.setObjective(this.objectiveText());
+      }
+    }
+  }
+
+  updateCollect(s, p) {
+    const G = this.G;
+    for (const key of s.places) {
+      if (this.collected.has(key)) continue;
+      const place = G.city.places[key];
+      if (Math.hypot(p.x - place.x, p.z - place.z) < s.radius) {
+        this.collected.add(key);
+        const mesh = this.crateMeshes.get(key);
+        if (mesh) {
+          G.scene.remove(mesh);
+          this.crateMeshes.delete(key);
+        }
+        G.audio.pickup();
+        G.hud.toast(`Kotak ${this.collected.size}/${s.places.length} terkumpul.`);
+        if (this.collected.size >= s.places.length) {
+          this.advanceStep();
+          return;
+        }
+        G.hud.setObjective(this.objectiveText());
+      }
+    }
   }
 
   updateTail(dt) {
@@ -291,6 +422,7 @@ export class Missions {
       }
       if (this.tailProgress >= 20) {
         this.stepIdx = 1;
+        this.armStep();
         // the target parks at the drop and waits
         const stop = G.city.places.targetStop;
         car.ai = null;
@@ -310,6 +442,7 @@ export class Missions {
     this.G.audio.pickup();
     if (this.stepIdx >= d.steps.length) this.completeMission();
     else {
+      this.armStep();
       this.G.hud.setObjective(this.objectiveText());
       this.G.saveGame();
     }
@@ -327,9 +460,10 @@ export class Missions {
     this.stepIdx = 0;
     this.tailProgress = 0;
     this.wave = 0;
+    this.clearCrates();
     for (const e of G.enemies) e.dispose();
     G.enemies.length = 0;
-    if (this.index === 4) {
+    if (this.isFinale) {
       this.available = true;
       G.hud.showMissionButton(true);
       G.hud.setObjective(this.objectiveText());
@@ -343,6 +477,7 @@ export class Missions {
   }
 
   updateBeacon(dt) {
+    void dt;
     const pos = this.active ? this.objectivePos() : null;
     if (!pos) {
       this.beacon.visible = false;

@@ -71,6 +71,17 @@ class Officer {
   }
 }
 
+// Dispatch chatter, one line per star gained, heard as a toast — the bay's
+// police radio gets less polite as the stars climb.
+const RADIO_LINES = [
+  '',
+  '📻 Dispatch: "Unit terdekat, cek laporan gangguan di sekitar tersangka."',
+  '📻 Dispatch: "Tersangka terkonfirmasi. Semua unit, waspada."',
+  '📻 Dispatch: "Kejar kendaraannya! Jangan sampai lolos ke jembatan mana pun."',
+  '📻 Dispatch: "Tersangka bersenjata dan berbahaya. Minta tambahan unit!"',
+  '📻 Dispatch: "SELURUH unit kejar tersangka. Ini prioritas kota!"',
+];
+
 export class Police {
   constructor(G) {
     this.G = G;
@@ -78,6 +89,7 @@ export class Police {
     this.cars = [];
     this.officers = [];
     this.spawnTimer = 0;
+    this.lastStarsHeard = 0;
   }
 
   get stars() {
@@ -144,12 +156,20 @@ export class Police {
     // heat cools when the player stays out of sight
     const near = this.nearestPoliceDist(G.player.effectivePos());
     const decay = near < 60 ? WANTED.decayPerSec : WANTED.decayFarPerSec;
-    const mission5Running = G.missions.index === 4 && !G.missions.available;
-    if (this.stars > 0 && !mission5Running) this.setHeat(this.heat - decay * dt);
-    if (mission5Running) {
+    // the finale — whichever index it sits at — pins the heat at five stars
+    // for as long as it runs, so the escape can never cool off mid-flight
+    const finaleRunning = G.missions.isFinale && !G.missions.available;
+    if (this.stars > 0 && !finaleRunning) this.setHeat(this.heat - decay * dt);
+    if (finaleRunning) {
       // during the final escape the heat stays pinned
       this.setHeat(Math.max(this.heat, WANTED.stars[5]));
     }
+
+    // radio chatter the moment a new star lands (never on the way down)
+    if (this.stars > this.lastStarsHeard) {
+      G.hud.toast(RADIO_LINES[this.stars]);
+    }
+    this.lastStarsHeard = this.stars;
 
     const wantCars = Math.min(this.stars, WANTED.maxPoliceCars);
     if (this.cars.length < wantCars) {

@@ -1,6 +1,8 @@
 // HUD: cash, health, wanted stars, objective line, speedometer, a live
-// top-down minimap, dialogue box, toasts, and the start / wasted screens.
-import { STORY, CONTROLS } from './config.js';
+// top-down minimap, dialogue box, toasts, the side-activity status line,
+// the district banner that names the quarter you just drove into, and the
+// start / wasted / complete screens.
+import { DISTRICTS, MISSIONS, STORY, CONTROLS } from './config.js';
 
 const MAP_SIZE = 220;
 const WORLD_SPAN = 620; // world -310..310 maps onto the canvas
@@ -14,16 +16,19 @@ export class HUD {
       'hud-speed', 'hud-mission-btn', 'dialog', 'dialog-speaker', 'dialog-text',
       'toast', 'screen-start', 'btn-start', 'btn-continue', 'screen-wasted',
       'screen-complete', 'btn-complete', 'minimap', 'start-controls', 'start-save-note',
-      'crosshair',
+      'crosshair', 'hud-activity', 'hud-district', 'start-districts',
     ]) {
       this.el[id] = document.getElementById(id);
     }
     this.mapCtx = this.el['minimap'].getContext('2d');
     this.dialogTimer = 0;
     this.toastTimer = 0;
+    this.districtTimer = 0;
     this.lastStars = -1;
     this.lastCash = -1;
+    this.lastActivity = '';
     this.buildControlsList();
+    this.buildDistrictChips();
     this.el['btn-start'].addEventListener('click', () => this.G.startGame(false));
     this.el['btn-continue'].addEventListener('click', () => this.G.startGame(true));
     this.el['hud-mission-btn'].addEventListener('click', () => this.G.missions.tryStartNext());
@@ -33,6 +38,15 @@ export class HUD {
   buildControlsList() {
     this.el['start-controls'].innerHTML = CONTROLS.map(
       ([k, v]) => `<div class="ctl"><span class="key">${k}</span><span>${v}</span></div>`,
+    ).join('');
+  }
+
+  buildDistrictChips() {
+    // the start screen advertises the quarters the story now travels to
+    const el = this.el['start-districts'];
+    if (!el) return;
+    el.innerHTML = DISTRICTS.map(
+      (d) => `<div class="district-chip" style="color:${d.banner}">${d.name}<small>${d.motto}</small></div>`,
     ).join('');
   }
 
@@ -53,6 +67,20 @@ export class HUD {
     this.toastTimer = 3.5;
   }
 
+  showDistrict(district) {
+    const el = this.el['hud-district'];
+    if (!el) return;
+    if (!district) {
+      el.classList.add('hidden');
+      this.districtTimer = 0;
+      return;
+    }
+    el.textContent = `${district.name} — ${district.tagline}`;
+    el.style.color = district.banner;
+    el.classList.remove('hidden');
+    this.districtTimer = 3.2;
+  }
+
   showWasted(show) {
     this.el['screen-wasted'].classList.toggle('hidden', !show);
   }
@@ -62,6 +90,7 @@ export class HUD {
   }
 
   showMissionButton(show) {
+    this.el['hud-mission-btn'].textContent = `▶ MULAI MISI ${MISSIONS.length}`;
     this.el['hud-mission-btn'].classList.toggle('hidden', !show);
   }
 
@@ -70,7 +99,7 @@ export class HUD {
     this.el['hud'].classList.add('hidden');
     this.el['btn-continue'].classList.toggle('hidden', !hasSave);
     this.el['start-save-note'].textContent = hasSave && saveInfo
-      ? `Save ditemukan: $${saveInfo.cash} · misi ${saveInfo.missionIndex + 1}/5`
+      ? `Save ditemukan: $${saveInfo.cash} · misi ${Math.min(saveInfo.missionIndex + 1, MISSIONS.length)}/${MISSIONS.length}`
       : '';
   }
 
@@ -90,6 +119,10 @@ export class HUD {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.el['toast'].classList.add('hidden');
     }
+    if (this.districtTimer > 0) {
+      this.districtTimer -= dt;
+      if (this.districtTimer <= 0) this.el['hud-district'].classList.add('hidden');
+    }
     if (P.cash !== this.lastCash) {
       this.lastCash = P.cash;
       this.el['hud-cash'].textContent = `$${P.cash}`;
@@ -103,12 +136,20 @@ export class HUD {
     }
     if (!P.onFoot && P.car) {
       const kmh = Math.round(Math.abs(P.car.speed) * 3.6);
-      this.el['hud-speed'].textContent = `${kmh} km/h`;
+      const kind = P.car.kindLabel ? ` · ${P.car.kindLabel}` : '';
+      this.el['hud-speed'].textContent = `${kmh} km/h${kind}`;
       this.el['hud-speed'].classList.remove('hidden');
     } else {
       this.el['hud-speed'].classList.add('hidden');
     }
     this.el['crosshair'].classList.toggle('hidden', !(G.mode === 'playing' && P.onFoot && !P.dead));
+    if (G.activities) {
+      const status = G.activities.statusText();
+      if (status !== this.lastActivity) {
+        this.lastActivity = status;
+        this.el['hud-activity'].textContent = status;
+      }
+    }
     this.drawMinimap();
   }
 
@@ -127,6 +168,14 @@ export class HUD {
     ctx.fillStyle = '#2d5a33';
     const [px, py] = toMap(-22, -22);
     ctx.fillRect(px, py, 44 * s, 44 * s);
+    // districts as soft tinted quarters, each in its accent colour
+    if (G.city.districts) {
+      for (const d of G.city.districts) {
+        const [dx, dy] = toMap(d.minX, d.minZ);
+        ctx.fillStyle = `#${d.accent.toString(16).padStart(6, '0')}2e`;
+        ctx.fillRect(dx, dy, (d.maxX - d.minX) * s, (d.maxZ - d.minZ) * s);
+      }
+    }
     // roads
     ctx.strokeStyle = '#55555f';
     ctx.lineWidth = 4;
@@ -156,10 +205,17 @@ export class HUD {
       if (car.police || car.parked) continue;
       dot(car.pos.x, car.pos.z, 2, '#9a9aa8');
     }
-    // parked / mission cars
+    // parked / mission cars (the taxi gets its own cab-yellow dot)
     for (const car of G.vehicles.cars) {
       if (!car.parked || !car.marker) continue;
-      dot(car.pos.x, car.pos.z, 3, car.marker === 'sedan' ? '#ff4444' : '#c26aff');
+      const color = car.marker === 'sedan' ? '#ff4444' : car.marker === 'taxi' ? '#f2b134' : '#c26aff';
+      dot(car.pos.x, car.pos.z, 3, color);
+    }
+    // uncollected neon shells
+    if (G.activities) {
+      for (const shell of G.activities.shells) {
+        if (!shell.taken) dot(shell.x, shell.z, 2.2, '#ff4fd8');
+      }
     }
     // enemies
     for (const e of G.enemies) {
@@ -167,7 +223,20 @@ export class HUD {
     }
     // police
     for (const c of G.police.cars) dot(c.pos.x, c.pos.z, 3, '#4488ff');
-    // mission marker (pulsing)
+    // side-activity marker (taxi target or next race gate), cyan diamond
+    const actObj = G.activities ? G.activities.markerPos() : null;
+    if (actObj) {
+      const [mx, my] = toMap(actObj.x, actObj.z);
+      ctx.fillStyle = '#33e0ff';
+      ctx.beginPath();
+      ctx.moveTo(mx, my - 5);
+      ctx.lineTo(mx + 4, my);
+      ctx.lineTo(mx, my + 5);
+      ctx.lineTo(mx - 4, my);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // mission marker (pulsing gold diamond)
     const obj = G.missions.objectivePos();
     if (obj && G.missions.active) {
       const pulse = 4 + Math.sin(G.time * 4) * 1.5;

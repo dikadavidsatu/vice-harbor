@@ -60,9 +60,11 @@ export function applyShot(G, name) {
   }
 
   if (name === 'mission') {
-    // mission 1 is already active; drive east toward the pier beacon
-    G.autoWaypoints = [[240, 0], [300, 0], [360, 0], [360, 0]];
-    viper.pos.set(120, 0, 0);
+    // mission 1 is already active; start at the Pasar Senja gate and drive
+    // the market road east toward the beach, stalls and string lights in
+    // frame, with the pier run as the leg after that
+    G.autoWaypoints = [[240, 180], [300, 180], [300, 60], [330, 0], [360, 0]];
+    viper.pos.set(120, 0, 180);
     viper.heading = Math.PI / 2;
     viper.speed = 0;
     viper.syncMesh();

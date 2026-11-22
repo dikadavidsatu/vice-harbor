@@ -10,6 +10,7 @@ export class AudioSys {
     this.engineFilter = null;
     this.sirenOsc = null;
     this.sirenGain = null;
+    this.ambienceGain = null;
     this.musicTimer = null;
     this.musicStep = 0;
     this.enabled = true;
@@ -29,6 +30,7 @@ export class AudioSys {
       this.master.connect(this.ctx.destination);
       this.startEngineLoop();
       this.startSirenLoop();
+      this.startAmbience();
       this.startMusic();
       return true;
     } catch (_) {
@@ -95,6 +97,47 @@ export class AudioSys {
     this.sirenGain.gain.setTargetAtTime(on ? 0.02 + 0.05 * near01 : 0, this.ctx.currentTime, 0.2);
   }
 
+  startAmbience() {
+    // Looped, heavily low-passed noise reads as surf; a slow LFO breathes
+    // the filter up and down so the "waves" arrive in sets. The gain is
+    // driven from the player's distance to the beach (setAmbience).
+    const c = this.ctx;
+    const len = c.sampleRate * 3;
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const data = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      // pinkish noise: integrate white noise lightly so it rumbles
+      const white = Math.random() * 2 - 1;
+      last = last * 0.94 + white * 0.06;
+      data[i] = last * 6;
+    }
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const filter = c.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 420;
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 0.09;
+    const lfoGain = c.createGain();
+    lfoGain.gain.value = 190;
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+    this.ambienceGain = c.createGain();
+    this.ambienceGain.gain.value = 0;
+    src.connect(filter);
+    filter.connect(this.ambienceGain);
+    this.ambienceGain.connect(this.master);
+    src.start();
+    lfo.start();
+  }
+
+  setAmbience(near01) {
+    if (!this.ctx || !this.ambienceGain) return;
+    this.ambienceGain.gain.setTargetAtTime(0.14 * near01, this.ctx.currentTime, 0.4);
+  }
+
   blip(freq, dur, type = 'sine', vol = 0.2, when = 0) {
     if (!this.ctx) return;
     try {
@@ -150,6 +193,35 @@ export class AudioSys {
     this.blip(880, 0.1, 'triangle', 0.2);
     this.blip(1174, 0.14, 'triangle', 0.2, 0.08);
     this.blip(1568, 0.22, 'triangle', 0.18, 0.16);
+  }
+  horn() {
+    // two-tone car horn, short and rude
+    this.blip(370, 0.22, 'square', 0.14);
+    this.blip(466, 0.22, 'square', 0.12);
+  }
+  collect() {
+    // the neon-shell chime: a quick glassy arpeggio, brighter than a pickup
+    this.blip(1318, 0.1, 'sine', 0.18);
+    this.blip(1760, 0.12, 'sine', 0.16, 0.06);
+    this.blip(2349, 0.2, 'sine', 0.14, 0.12);
+  }
+  countdown() {
+    // three low beeps and a high go-beep for the street race start
+    this.blip(440, 0.14, 'square', 0.16);
+    this.blip(440, 0.14, 'square', 0.16, 0.35);
+    this.blip(440, 0.14, 'square', 0.16, 0.7);
+    this.blip(880, 0.34, 'square', 0.18, 1.05);
+  }
+  fareDone() {
+    // taxi meter fanfare: ka-ching with a little two-note cab jingle
+    this.noiseBurst(0.05, 0.18, 5200);
+    this.blip(784, 0.1, 'triangle', 0.2, 0.02);
+    this.blip(1046, 0.16, 'triangle', 0.2, 0.1);
+  }
+  districtChime() {
+    // a soft two-note motif when the player crosses into a new district
+    this.blip(587, 0.16, 'sine', 0.1);
+    this.blip(880, 0.24, 'sine', 0.09, 0.12);
   }
   busted() {
     this.blip(220, 0.5, 'sawtooth', 0.2);

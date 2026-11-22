@@ -20,6 +20,8 @@
   #hud-stars.hot { color: #ffd23b; text-shadow: 0 0 14px rgba(255, 210, 59, 0.9); }
   #hud-objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 9px 18px; font-size: 15px; font-weight: 600; color: #ffe9a0; max-width: 46vw; text-align: center; }
   #hud-speed { position: absolute; bottom: 18px; right: 18px; padding: 10px 16px; font-size: 24px; font-weight: 800; color: #fff; }
+  #hud-activity { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 7px 14px; font-size: 13.5px; font-weight: 600; color: #bfeaff; white-space: nowrap; }
+  #hud-district { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); padding: 8px 20px; font-size: 17px; font-weight: 800; letter-spacing: 1px; text-shadow: 0 2px 10px rgba(0,0,0,0.7); }
   #minimap { position: absolute; bottom: 16px; left: 16px; width: 220px; height: 220px; border: 2px solid rgba(255, 210, 59, 0.45); border-radius: 8px; background: #101018; }
   #hud-mission-btn { position: absolute; bottom: 252px; left: 16px; pointer-events: auto; cursor: pointer; padding: 10px 16px; font-size: 15px; font-weight: 700; color: #14101c; background: #ffd23b; border: none; border-radius: 8px; }
   #dialog { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: min(620px, 80vw); padding: 14px 18px; }
@@ -37,6 +39,9 @@
   .btn { pointer-events: auto; cursor: pointer; margin-top: 22px; padding: 14px 42px; font-size: 19px; font-weight: 800; letter-spacing: 2px; color: #14101c; background: linear-gradient(180deg, #ffe066, #ffb52e); border: none; border-radius: 10px; box-shadow: 0 4px 24px rgba(255, 170, 40, 0.5); }
   .btn.secondary { background: rgba(255,255,255,0.12); color: #fff; box-shadow: none; border: 1px solid rgba(255,255,255,0.35); font-size: 16px; padding: 11px 30px; }
   #start-controls { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 26px; text-align: left; font-size: 14px; color: #cfc8de; }
+  #start-districts { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .district-chip { padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.3); background: rgba(12, 10, 22, 0.55); font-size: 13.5px; font-weight: 700; letter-spacing: 0.5px; }
+  .district-chip small { display: block; font-weight: 400; color: #cfc8de; letter-spacing: 0; }
   .ctl { display: flex; gap: 10px; align-items: baseline; }
   .key { display: inline-block; min-width: 74px; font-weight: 700; color: #ffd23b; }
   #start-save-note { margin-top: 12px; color: #7dff9a; font-size: 14px; }
@@ -59,10 +64,12 @@
   </div>
   <div id="hud-stars">☆☆☆☆☆</div>
   <div id="hud-objective" class="panel">Neon Bay</div>
+  <div id="hud-district" class="hidden"></div>
+  <div id="hud-activity" class="panel">🐚 Kerang 0/12</div>
   <div id="hud-speed" class="panel hidden">0 km/h</div>
   <div id="crosshair" class="hidden"></div>
   <canvas id="minimap" width="220" height="220"></canvas>
-  <button id="hud-mission-btn" class="hidden">▶ MULAI MISI 5</button>
+  <button id="hud-mission-btn" class="hidden">▶ MULAI MISI 10</button>
   <div id="dialog" class="panel hidden">
     <div id="dialog-speaker">Mara Voss</div>
     <div id="dialog-text"></div>
@@ -72,11 +79,12 @@
 
 <div id="screen-start" class="screen">
   <h1 id="game-title">NEON BAY</h1>
-  <h2 id="game-tagline">A sun-soaked bay city. One driver. Five jobs. No way back.</h2>
-  <p class="story">Kamu datang ke Neon Bay dengan jaket pinjaman dan mobil cepat. Mara Voss yang mengatur semua kerjaan di teluk ini. Selesaikan lima misinya — dari paket dermaga sampai pelarian lima bintang — dan namamu jadi legenda.</p>
+  <h2 id="game-tagline">A sun-soaked bay city. One driver. Ten jobs. No way back.</h2>
+  <p class="story">Kamu datang ke Neon Bay dengan jaket pinjaman dan mobil cepat. Mara Voss yang mengatur semua kerjaan di teluk ini. Selesaikan sepuluh misinya — dari paket dermaga, kurir lintas Pasar Senja dan Bukit Kaca, sampai pertahanan Pelabuhan Tua dan pelarian lima bintang — dan namamu jadi legenda. Di sela misi: narik taksi, balapan jalanan, dan berburu kerang neon.</p>
   <button id="btn-start" class="btn">▶ MULAI</button>
   <button id="btn-continue" class="btn secondary hidden">LANJUTKAN SAVE</button>
   <div id="start-save-note"></div>
+  <div id="start-districts"></div>
   <div id="start-controls"></div>
 </div>
 
@@ -87,8 +95,8 @@
 
 <div id="screen-complete" class="screen hidden">
   <h1>LEGENDA TELUK</h1>
-  <h2>Lima misi. Lima bintang. Satu nama yang tak terlupakan.</h2>
-  <p class="story">Kamu lolos dari seluruh kota. Mulai hari ini, semua kru di Neon Bay menyebut namamu dengan hormat — dan sedikit takut.</p>
+  <h2>Sepuluh misi. Lima bintang. Satu nama yang tak terlupakan.</h2>
+  <p class="story">Kamu lolos dari seluruh kota — dermaga, pasar, menara kaca, dan pelabuhan tua semuanya jadi saksi. Mulai hari ini, semua kru di Neon Bay menyebut namamu dengan hormat — dan sedikit takut.</p>
   <button id="btn-complete" class="btn">JELAJAHI KOTA</button>
 </div>
 
