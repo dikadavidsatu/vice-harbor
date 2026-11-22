@@ -32,6 +32,7 @@ export function writeSave(state) {
       pos: [round1(state.pos.x), round1(state.pos.z)],
       health: Math.round(state.health),
       activities: state.activities ?? null,
+      photos: state.photos ?? null,
       savedAt: Date.now(),
     };
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(blob));

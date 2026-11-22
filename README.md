@@ -40,6 +40,10 @@ Driving into a district raises its banner on the HUD, plays a small chime, and t
 
 Plus a live minimap with district tints and markers for shells, fares and race gates; a HUD with a side-activity status line; localStorage saves covering story progress *and* shells, fares and race records; and fully synthesised WebAudio sound — engine, gunfire, sirens, horns, taxi meters and a synthwave loop. No external assets at all.
 
+## Photo Mode
+
+Press **C** in game to open Photo Mode (`game/src/photomode.js`): the HUD fades, a rule-of-thirds viewfinder and a caption bar naming the neighbourhood in frame appear, and five colour grades — Clean, Sunset Glow, Neon Nights, Bay Noir and Old Postcard — can be cycled with **[** and **]**. **G** toggles the grid, **Enter** saves a snapshot of the canvas as a PNG download, and **C** or **Esc** leaves. The album tally and the latest captions ride along in the localStorage save, and the hand-in summary in `main.ts` lists the grades so the feature is part of the shipped manifest. The four files under `screenshots/` are staged scenes of this same build, regenerated headlessly from the live game with `node tools/capture-screenshots.mjs`.
+
 ## Run it
 
 ```sh

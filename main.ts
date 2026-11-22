@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 import { DISTRICTS, MISSIONS } from './game/src/config.js';
+import { PHOTO_FILTERS } from './game/src/photomode.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -59,6 +60,8 @@ function summarise() {
     districts: DISTRICTS.map((d) => d.name),
     district_ids: DISTRICTS.map((d) => d.id),
     total_reward: reward,
+    photo_filters: PHOTO_FILTERS.map((f) => f.id),
+    photo_filter_labels: PHOTO_FILTERS.map((f) => f.label),
   };
 }
 

@@ -18,6 +18,7 @@ import { HUD } from './hud.js';
 import { Activities } from './activities.js';
 import { loadSave, writeSave } from './save.js';
 import { applyShot } from './shots.js';
+import { PhotoMode } from './photomode.js';
 import { PALETTE, ROADS, STORY, MISSIONS, FINAL_MISSION_INDEX } from './config.js';
 
 const params = new URLSearchParams(window.location.search);
@@ -98,6 +99,7 @@ G.missions = new Missions(G);
 G.police = new Police(G);
 G.activities = new Activities(G);
 G.hud = new HUD(G);
+G.photomode = new PhotoMode(G);
 
 G.saveGame = () => {
   writeSave({
@@ -107,6 +109,7 @@ G.saveGame = () => {
     pos: G.player.effectivePos(),
     health: G.player.health,
     activities: G.activities.state(),
+    photos: G.photomode.state(),
   });
 };
 
@@ -126,6 +129,7 @@ G.startGame = (continueSave) => {
       if (G.missions.index >= MISSIONS.length) G.hud.showComplete(false);
       if (G.missions.active) G.missions.armStep();
       if (save.activities) G.activities.restore(save.activities);
+      if (save.photos) G.photomode.restore(save.photos);
       G.hud.setObjective(G.missions.objectiveText());
       G.hud.toast('Save dimuat. Selamat datang kembali di Neon Bay.');
     }
@@ -193,6 +197,7 @@ function frame() {
     G.player.updateCamera(dt);
   }
   G.hud.update(dt);
+  G.photomode.update(dt);
   if (G.shotReadyAt !== null && !window.__shotReady && G.time >= G.shotReadyAt) {
     window.__shotReady = true;
   }
