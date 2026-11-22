@@ -1,38 +1,48 @@
-// Deterministic screenshot scenes for ?shot=start|drive|chase|mission.
-// Each one stages the game, then main.js flips window.__shotReady on.
-// Shots wait 8 s of game time so the mission intro dialogue has faded.
-const CITY_LOOP = [[0, 180], [180, 180], [180, -180], [-180, -180], [-180, 180], [0, 180]];
+// shots.js — staged scenes for the entry's screenshot renders.
+//
+// ?shot=<name>&seed=<n> puts the game into a composed tableau instead of
+// the menu: the player's coupe auto-drives a fixed route while traffic,
+// police or the first mission are arranged around it. Once staging is done
+// the scene just needs to settle; main.js watches G.shotReadyAt and flips
+// window.__shotReady when game time passes it. The 8-second waits exist so
+// the mission intro dialogue (6.5 s) has left the frame.
+
+const BAY_LOOP = [[0, 180], [180, 180], [180, -180], [-180, -180], [-180, 180], [0, 180]];
+
+function stageDriver(G, car, x, z, heading, waypoints) {
+  G.autoWaypoints = waypoints;
+  car.pos.set(x, 0, z);
+  car.heading = heading;
+  car.speed = 0;
+  car.syncMesh();
+  G.player.enterCar(car);
+  G.player.autoDrive = true;
+}
 
 export function applyShot(G, name) {
-  const viper = G.vehicles.cars.find((c) => c.name === 'Viper');
   if (name === 'start') {
-    // menu orbit over the city + start screen; nothing else to stage
+    // Nothing to stage: the menu's orbiting camera over the city is the shot.
     G.shotReadyAt = 1.0;
     return;
   }
   G.startGame(false);
+  const viper = G.vehicles.cars.find((c) => c.name === 'Viper');
   if (!viper) {
     G.shotReadyAt = 0.5;
     return;
   }
 
   if (name === 'drive') {
-    // north up road x=0 with traffic staged ahead of the Viper
-    G.autoWaypoints = CITY_LOOP;
-    viper.pos.set(0, 0, -180);
-    viper.heading = 0;
-    viper.speed = 0;
-    viper.syncMesh();
-    G.player.enterCar(viper);
-    G.player.autoDrive = true;
-    const traffic = G.vehicles.cars.filter((c) => c.ai).slice(0, 3);
-    const spots = [[2, -40], [-2, 30], [2, 90]];
-    traffic.forEach((car, i) => {
-      car.pos.set(spots[i][0], 0, spots[i][1]);
+    // Straight up the x=0 road, three traffic cars parked in the lane ahead
+    // so the frame reads as live traffic rather than an empty street.
+    stageDriver(G, viper, 0, -180, 0, BAY_LOOP);
+    const ahead = [[2, -40], [-2, 30], [2, 90]];
+    G.vehicles.cars.filter((c) => c.ai).slice(0, 3).forEach((car, i) => {
+      car.pos.set(ahead[i][0], 0, ahead[i][1]);
       car.heading = 0;
       car.speed = 0;
-      car.ai.node = { x: 0, z: spots[i][1] };
-      car.ai.target = { x: 0, z: spots[i][1] + 60 };
+      car.ai.node = { x: 0, z: ahead[i][1] };
+      car.ai.target = { x: 0, z: ahead[i][1] + 60 };
       car.syncMesh();
     });
     G.shotReadyAt = 8.0;
@@ -40,36 +50,25 @@ export function applyShot(G, name) {
   }
 
   if (name === 'chase') {
-    // three stars, two cruisers riding in formation beside the Viper
-    G.autoWaypoints = CITY_LOOP;
-    viper.pos.set(0, 0, -180);
-    viper.heading = 0;
-    viper.speed = 0;
-    viper.syncMesh();
-    G.player.enterCar(viper);
-    G.player.autoDrive = true;
-    G.police.setHeat(95); // three stars, holding through the 8 s staging
+    // Three stars held artificially, two cruisers pinned in formation at
+    // the Viper's flanks — the classic pursuit photograph.
+    stageDriver(G, viper, 0, -180, 0, BAY_LOOP);
+    G.police.setHeat(95);
     G.police.update(0.05);
     G.police.update(0.05);
     G.police.update(0.05);
-    const escorts = G.police.cars.slice(0, 2);
-    escorts[0].formation = { right: -5, back: 2 };
-    if (escorts[1]) escorts[1].formation = { right: 5, back: 4 };
+    const [left, right] = G.police.cars;
+    if (left) left.formation = { right: -5, back: 2 };
+    if (right) right.formation = { right: 5, back: 4 };
     G.shotReadyAt = 8.0;
     return;
   }
 
   if (name === 'mission') {
-    // mission 1 is already active; start at the Pasar Senja gate and drive
-    // the market road east toward the beach, stalls and string lights in
-    // frame, with the pier run as the leg after that
-    G.autoWaypoints = [[240, 180], [300, 180], [300, 60], [330, 0], [360, 0]];
-    viper.pos.set(120, 0, 180);
-    viper.heading = Math.PI / 2;
-    viper.speed = 0;
-    viper.syncMesh();
-    G.player.enterCar(viper);
-    G.player.autoDrive = true;
+    // Mission one is live. Start at the Pasar Senja gate and run east along
+    // the market road toward the beach — stalls and string lights in frame —
+    // then continue down the pier.
+    stageDriver(G, viper, 120, 180, Math.PI / 2, [[240, 180], [300, 180], [300, 60], [330, 0], [360, 0]]);
     G.shotReadyAt = 8.0;
     return;
   }

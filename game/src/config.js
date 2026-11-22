@@ -1,22 +1,28 @@
-// Neon Bay — every tuning number, the palette, the districts, the story and
-// the mission data. One file, one job: nothing here touches the scene or the
-// DOM, so the city builder, the missions and the side activities can all read
-// the same facts about the world.
+// config.js — the single source of truth for Neon Bay's numbers and data:
+// layout constants, palette, tuning, the three districts, story framing
+// and all ten mission definitions. Nothing here builds geometry or touches
+// the DOM; every other module reads the same facts from this file.
+
 export const SAVE_KEY = 'neonbay-save-v1';
 
+// The street plan is a square grid. Roads sit every 60 units from -240 to
+// 240; east of x=270 the city gives up and the beach (x=300) and the bay
+// take over, with the pier reaching out to pierEndX.
 export const WORLD = {
   roadSpacing: 60,
-  roadHalf: 5, // asphalt half-width
-  walkHalf: 8, // road + sidewalk half-width
+  roadHalf: 5,
+  walkHalf: 8,
   gridMin: -240,
   gridMax: 240,
-  bound: 270, // city edge; beach starts here, bay beyond x = 300
+  bound: 270,
   beachX: 300,
   pierEndX: 358,
 };
 
 export const ROADS = [-240, -180, -120, -60, 0, 60, 120, 180, 240];
 
+// Golden-hour palette: warm sky and sand against teal water, with neon
+// pink/cyan reserved for gates, shells and other things that must be seen.
 export const PALETTE = {
   sky: 0xff9a5c,
   skyTop: 0x2c3e6e,
@@ -49,10 +55,9 @@ export const PALETTE = {
   neonCyan: 0x33e0ff,
 };
 
-// --- Districts -------------------------------------------------------------
-// Three themed quarters laid over the road grid. Each one changes how the
-// city builder treats its blocks (glass towers, market stalls, container
-// stacks) and each one anchors its own missions and side activities.
+// The three quarters that break up the old grid. A district is just a
+// rectangle plus presentation: the city builder themes the blocks inside
+// it, the player module announces crossings, the minimap tints it.
 export const DISTRICTS = [
   {
     id: 'pasar-senja',
@@ -92,11 +97,11 @@ export const DISTRICTS = [
   },
 ];
 
+// First district whose rectangle holds the point wins; the old grid
+// (and anywhere else) answers null.
 export function districtAt(x, z) {
-  for (const d of DISTRICTS) {
-    if (x >= d.minX && x <= d.maxX && z >= d.minZ && z <= d.maxZ) return d;
-  }
-  return null;
+  const hit = DISTRICTS.find((d) => x >= d.minX && x <= d.maxX && z >= d.minZ && z <= d.maxZ);
+  return hit ?? null;
 }
 
 export const PLAYER_TUNE = {
@@ -123,8 +128,9 @@ export const CAR_TUNE = {
   radius: 1.6,
 };
 
+// Wanted model: crimes add heat, the stars table turns heat into a star
+// count, and heat bleeds away over time — faster when no unit is close.
 export const WANTED = {
-  // heat thresholds per star
   stars: [0, 25, 50, 75, 100, 125],
   heatPerCrime: { shoot: 20, hitPed: 25, steal: 25, killPed: 30, ram: 8 },
   decayPerSec: 1.0,
@@ -140,24 +146,28 @@ export const STORY = {
   fixer: 'Mara Voss',
   fixerRole: 'fixer of the bay',
   intro:
-    'You rolled into Neon Bay with a borrowed jacket and a fast car. Mara Voss runs the jobs here. Do her ten jobs — pier, market, glass hill and the old harbour — and the bay is yours.',
+    'Kamu tiba di Neon Bay berbekal jaket pinjaman dan mobil yang cepat. Mara Voss mengatur semua pekerjaan di sini. Selesaikan sepuluh job-nya — dermaga, pasar, bukit kaca, pelabuhan tua — dan teluk ini jadi milikmu.',
   ending:
-    'Ten jobs. Five stars. One legend. The bay whispers your name now — the driver nobody catches.',
+    'Sepuluh job. Lima bintang. Satu legenda. Sekarang seluruh teluk membisikkan namamu — sopir yang tak pernah tertangkap.',
 };
 
-// --- Missions --------------------------------------------------------------
-// Ten jobs in order. Step kinds: goto, stealCar, deliverCar, tail, defend,
-// timedGoto (reach the place before the clock dies), driveTo (same, but you
-// must be in a car), race (hit every checkpoint in order, in a car) and
-// collect (pick up every marked crate, on foot or in a car).
+// The ten jobs, played strictly in order. A step is one objective:
+//   goto       reach the place (any way you like)
+//   stealCar   get into the car carrying the step's marker
+//   deliverCar bring the stolen car to the place
+//   tail       stay near the target car, unseen, until the clock fills
+//   defend     survive every wave at the place
+//   timedGoto  reach the place before stepTimer runs out
+//   driveTo    like goto, but only counts from behind a wheel
+//   race       pass each checkpoint in order, in a car
+//   collect    visit every place in the list
 export const MISSIONS = [
   {
     id: 0,
     title: 'Paket Dermaga',
     reward: 800,
-    intro:
-      'Mara Voss: "Paket panas di ujung dermaga. Ambil, antar ke titik drop selatan. Jangan bikin ribut."',
-    outro: 'Mara Voss: "Bersih. Kamu bisa diandalkan. Ada kerjaan lagi kalau mau."',
+    intro: 'Mara Voss: "Ada paket panas di ujung dermaga. Jemput, lalu taruh di titik drop selatan. Usahakan tidak menarik perhatian."',
+    outro: 'Mara Voss: "Rapi. Ternyata kamu bisa dipercaya. Nanti ada job lagi buatmu."',
     steps: [
       { kind: 'goto', place: 'pierEnd', radius: 5, text: 'Ambil paket di ujung dermaga' },
       { kind: 'goto', place: 'dropSouth', radius: 6, text: 'Antar paket ke titik drop selatan' },
@@ -167,9 +177,8 @@ export const MISSIONS = [
     id: 1,
     title: 'Mobil Pesanan',
     reward: 1200,
-    intro:
-      'Mara Voss: "Klien mau sedan merah itu. Curi, antar ke bengkel Riko. Jangan sampai penyok."',
-    outro: 'Riko: "Mulus. Klien senang. Mara bilang kamu naik kelas."',
+    intro: 'Mara Voss: "Klien mengincar sedan merah itu. Ambil mobilnya, kirim ke bengkel Riko. Body jangan sampai lecet."',
+    outro: 'Riko: "Utuh begini sih klien pasti senyum. Kata Mara, kelasmu naik."',
     steps: [
       { kind: 'stealCar', marker: 'sedan', text: 'Curi sedan merah' },
       { kind: 'deliverCar', place: 'garage', radius: 7, text: 'Antar sedan ke bengkel' },
@@ -179,9 +188,8 @@ export const MISSIONS = [
     id: 2,
     title: 'Ekor Panjang',
     reward: 1500,
-    intro:
-      'Mara Voss: "Ikuti coupe ungu itu. Jangan terlalu dekat — kalau dia sadar, barangnya hilang."',
-    outro: 'Mara Voss: "Barangnya di tangan. Kamu punya mata elang, anak baru."',
+    intro: 'Mara Voss: "Buntuti coupe ungu itu. Jaga jarak — sekali dia sadar, barangnya melayang."',
+    outro: 'Mara Voss: "Barangnya sudah di tangan. Matamu tajam juga, anak baru."',
     steps: [
       { kind: 'tail', marker: 'target', text: 'Buntuti coupe ungu — jaga jarak 10–50 m' },
       { kind: 'goto', place: 'targetStop', radius: 5, text: 'Ambil barang dari mobil target' },
@@ -191,9 +199,8 @@ export const MISSIONS = [
     id: 3,
     title: 'Pertahankan Gudang',
     reward: 2000,
-    intro:
-      'Mara Voss: "Geng Pelabuhan mau merebut gudang kita. Tahan tiga gelombang. Jangan biarkan mereka masuk."',
-    outro: 'Mara Voss: "Gudang aman. Pelabuhan sekarang tahu siapa yang pegang teluk ini."',
+    intro: 'Mara Voss: "Geng Pelabuhan berniat mengambil gudang kita. Tahan tiga gelombang serangan. Jangan biarkan satu pun masuk."',
+    outro: 'Mara Voss: "Gudang tetap berdiri. Orang pelabuhan sekarang paham siapa yang memegang teluk ini."',
     steps: [
       { kind: 'defend', place: 'warehouse', radius: 18, waves: [2, 3, 4], text: 'Pertahankan gudang — gelombang ' },
     ],
@@ -202,9 +209,8 @@ export const MISSIONS = [
     id: 4,
     title: 'Kurir Dua Distrik',
     reward: 1800,
-    intro:
-      'Mara Voss: "Dokumen dari kios Pasar Senja harus sampai ke lobi Menara Kaca sebelum rapat mulai. Jamnya jalan terus."',
-    outro: 'Mara Voss: "Tepat waktu. Orang Bukit Kaca jarang terkesan — kali ini mereka terkesan."',
+    intro: 'Mara Voss: "Dokumen di kios Pasar Senja harus tiba di lobi Menara Kaca sebelum rapat dibuka. Waktunya sudah berjalan."',
+    outro: 'Mara Voss: "Pas sekali. Orang Bukit Kaca itu sulit terkesan — tapi kali ini mereka terkesan."',
     steps: [
       { kind: 'timedGoto', place: 'marketStall', radius: 6, timeLimit: 75, text: 'Ambil dokumen di kios Pasar Senja' },
       { kind: 'timedGoto', place: 'glassLobby', radius: 7, timeLimit: 110, text: 'Antar dokumen ke lobi Menara Kaca — cepat!' },
@@ -214,9 +220,8 @@ export const MISSIONS = [
     id: 5,
     title: 'Balapan Senja',
     reward: 2200,
-    intro:
-      'Mara Voss: "Kru Pasar Senja taruhan besar soal siapa pembalap tercepat di teluk. Lewati semua gerbang, jangan sampai kalah."',
-    outro: 'Mara Voss: "Kru pasar sampai terdiam. Taruhannya kita yang pegang sekarang."',
+    intro: 'Mara Voss: "Kru Pasar Senja bertaruh besar soal pembalap tercepat di teluk ini. Sikat semua gerbangnya, jangan kasih kendor."',
+    outro: 'Mara Voss: "Kru pasar sampai kehilangan kata-kata. Taruhannya sekarang kita yang pegang."',
     steps: [
       {
         kind: 'race',
@@ -230,9 +235,8 @@ export const MISSIONS = [
     id: 6,
     title: 'Kotak-Kotak Hilang',
     reward: 2400,
-    intro:
-      'Mara Voss: "Truk Pelabuhan Tua menjatuhkan empat kotak bercahaya semalam. Kumpulkan semuanya sebelum orang lain yang menemukan."',
-    outro: 'Mara Voss: "Empat kotak, lengkap. Isinya? Lebih baik kamu tidak tahu."',
+    intro: 'Mara Voss: "Semalam truk Pelabuhan Tua menjatuhkan empat kotak bercahaya. Kumpulkan semuanya sebelum jatuh ke tangan orang lain."',
+    outro: 'Mara Voss: "Empat kotak, tidak kurang. Soal isinya — lebih baik kamu tidak bertanya."',
     steps: [
       {
         kind: 'collect',
@@ -246,9 +250,8 @@ export const MISSIONS = [
     id: 7,
     title: 'VIP Bukit Kaca',
     reward: 2600,
-    intro:
-      'Mara Voss: "Seorang VIP menunggu di Menara Kaca. Jemput dia dengan mobil, antar ke Pelabuhan Tua sebelum kapalnya berangkat."',
-    outro: 'Mara Voss: "VIP-nya sampai, kapalnya berangkat, dan tidak ada yang tahu kamu yang mengantar."',
+    intro: 'Mara Voss: "Seorang VIP menunggumu di Menara Kaca. Jemput pakai mobil, antar ke Pelabuhan Tua sebelum kapalnya lepas jangkar."',
+    outro: 'Mara Voss: "VIP sampai, kapal berangkat, dan tak seorang pun tahu kamu sopirnya. Sempurna."',
     steps: [
       { kind: 'driveTo', place: 'glassLobby', radius: 7, text: 'Jemput VIP di lobi Menara Kaca (dengan mobil)' },
       { kind: 'timedGoto', place: 'harborGate', radius: 8, timeLimit: 100, text: 'Antar VIP ke gerbang Pelabuhan Tua' },
@@ -258,9 +261,8 @@ export const MISSIONS = [
     id: 8,
     title: 'Malam di Pelabuhan',
     reward: 3200,
-    intro:
-      'Mara Voss: "Geng Pelabuhan menyerang balik — kali ini di halaman kontainer mereka sendiri. Tahan tiga gelombang di Pelabuhan Tua."',
-    outro: 'Mara Voss: "Pelabuhan diam sekarang. Seluruh teluk tahu siapa yang menang malam ini."',
+    intro: 'Mara Voss: "Geng Pelabuhan membalas — di halaman kontainer mereka sendiri. Bertahanlah melewati tiga gelombang di Pelabuhan Tua."',
+    outro: 'Mara Voss: "Pelabuhan sunyi malam ini. Seisi teluk tahu siapa pemenangnya."',
     steps: [
       { kind: 'defend', place: 'harborGate', radius: 20, waves: [3, 3, 5], text: 'Pertahankan Pelabuhan Tua — gelombang ' },
     ],
@@ -269,22 +271,22 @@ export const MISSIONS = [
     id: 9,
     title: 'Pelarian Teluk',
     reward: 4000,
-    intro:
-      'Mara Voss: "Seluruh kota memburumu sekarang. Lima bintang. Sampai ke safehouse — hidup-hidup."',
-    outro: 'Mara Voss: "Kamu lolos dari lima bintang. Mulai hari ini, kamu legenda Neon Bay."',
+    intro: 'Mara Voss: "Sekarang seluruh kota memburumu. Lima bintang. Capai safehouse — dan tetap hidup."',
+    outro: 'Mara Voss: "Lolos dari kejaran lima bintang. Mulai malam ini, kamu legenda Neon Bay."',
     steps: [
       { kind: 'goto', place: 'safehouse', radius: 7, text: 'Kabur ke safehouse — hindari polisi!' },
     ],
   },
 ];
 
-// The finale is always the last mission in the list; earlier code pinned
-// heat and gated the start button on a hard-coded index, now it follows
-// the data so the story can grow.
+// The finale is defined by position, not by a magic number: it is simply
+// the last entry of MISSIONS. Gating and the police heat-pin both key off
+// this, so appending an eleventh job tomorrow moves the finale with it.
 export const FINAL_MISSION_INDEX = MISSIONS.length - 1;
 
 export const DIALOG_MS = 6500;
 
+// Shown on the start screen and in the README; keep the two in step.
 export const CONTROLS = [
   ['W A S D', 'Bergerak / mengemudi'],
   ['Mouse', 'Putar kamera (klik untuk kunci pointer)'],

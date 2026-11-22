@@ -1,21 +1,26 @@
-// One JSON blob in localStorage: cash, mission progress, position, health,
-// and the side-activity ledger (which neon shells are already collected,
-// how many taxi fares are done, and the street-race best time). The blob
-// stays version 1: older saves simply have no activities field, and the
-// loader treats that as a fresh ledger rather than a corrupt save.
+// save.js — persistence in a single localStorage blob.
+//
+// The blob records cash, story progress (mission + step), where the player
+// stood, their health, and the side-activity ledger produced by
+// activities.js (shells taken, fares completed, race best). It is versioned
+// (`v: 1`); a blob from an older build simply lacks the activities field,
+// which readers treat as an empty ledger rather than as corruption. Every
+// access is wrapped so private-mode browsers and full quotas degrade to
+// "no save" instead of crashing the game.
 import { SAVE_KEY } from './config.js';
 
 export function loadSave() {
   try {
     const raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || data.v !== 1) return null;
-    return data;
-  } catch (_) {
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.v === 1 ? parsed : null;
+  } catch {
     return null;
   }
 }
+
+const round1 = (n) => Math.round(n * 10) / 10;
 
 export function writeSave(state) {
   try {
@@ -23,15 +28,15 @@ export function writeSave(state) {
       v: 1,
       cash: Math.round(state.cash),
       missionIndex: state.missionIndex,
-      stepIdx: state.stepIdx || 0,
-      pos: [Math.round(state.pos.x * 10) / 10, Math.round(state.pos.z * 10) / 10],
+      stepIdx: state.stepIdx ?? 0,
+      pos: [round1(state.pos.x), round1(state.pos.z)],
       health: Math.round(state.health),
-      activities: state.activities || null,
+      activities: state.activities ?? null,
       savedAt: Date.now(),
     };
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(blob));
     return blob;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -39,5 +44,7 @@ export function writeSave(state) {
 export function clearSave() {
   try {
     window.localStorage.removeItem(SAVE_KEY);
-  } catch (_) {}
+  } catch {
+    // storage unavailable: clearing is best-effort by design
+  }
 }

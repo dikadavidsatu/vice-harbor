@@ -1,30 +1,40 @@
-// Wanted level: crimes raise heat, heat sets the stars, stars bring the
-// police — cruisers that ram and block, and officers on foot who can arrest.
+// police.js — the wanted system: heat, stars, and the units stars summon.
+//
+// Crimes reported through addCrime add heat; the WANTED table converts
+// heat to stars; stars decide how many cruisers and foot officers the city
+// fields. Cruisers steer straight at the player and nudge the player's car
+// when they connect; officers run the player down on foot and arrest after
+// a sustained grab (WANTED.arrestHoldSec). Heat decays over time — slowly
+// with units nearby, faster when the player breaks contact — except during
+// the finale, where it is pinned at five stars for the whole escape.
 import * as THREE from 'three';
 import { CAR_TUNE, WANTED, WORLD, ROADS } from './config.js';
 import { Car } from './vehicles.js';
 import { collideSolids } from './city.js';
 
-function buildOfficerMesh() {
-  const g = new THREE.Group();
+function officerMesh() {
+  const group = new THREE.Group();
   const uniform = new THREE.MeshLambertMaterial({ color: 0x1a2a4a });
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a878 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10), uniform);
-  body.position.y = 1.05;
-  g.add(body);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10), uniform);
+  torso.position.y = 1.05;
+  group.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10), skin);
   head.position.y = 1.78;
-  g.add(head);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.12, 12), new THREE.MeshLambertMaterial({ color: 0x0a1428 }));
+  group.add(head);
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.29, 0.29, 0.12, 12),
+    new THREE.MeshLambertMaterial({ color: 0x0a1428 }),
+  );
   cap.position.y = 1.98;
-  g.add(cap);
-  for (const lx of [-0.15, 0.15]) {
+  group.add(cap);
+  for (const side of [-0.15, 0.15]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.62, 0.22), uniform);
-    leg.position.set(lx, 0.31, 0);
-    leg.name = lx < 0 ? 'legL' : 'legR';
-    g.add(leg);
+    leg.position.set(side, 0.31, 0);
+    leg.name = side < 0 ? 'legL' : 'legR';
+    group.add(leg);
   }
-  return g;
+  return group;
 }
 
 class Officer {
@@ -33,16 +43,16 @@ class Officer {
     this.pos = new THREE.Vector3(x, 0, z);
     this.holdTimer = 0;
     this.bob = 0;
-    this.mesh = buildOfficerMesh();
+    this.mesh = officerMesh();
     this.mesh.position.copy(this.pos);
     G.scene.add(this.mesh);
   }
 
   update(dt) {
     const G = this.G;
-    const p = G.player.effectivePos();
-    const dx = p.x - this.pos.x;
-    const dz = p.z - this.pos.z;
+    const target = G.player.effectivePos();
+    const dx = target.x - this.pos.x;
+    const dz = target.z - this.pos.z;
     const dist = Math.hypot(dx, dz);
     if (dist > 1.5) {
       const speed = 6.2;
@@ -57,7 +67,8 @@ class Officer {
       if (legR) legR.rotation.x = -swing;
     }
     this.mesh.position.copy(this.pos);
-    // arrest: hold on to the player on foot for a while
+    // The arrest is a hold, not a touch: keep the player in arm's reach
+    // for the full hold time and the bust lands.
     if (G.player.onFoot && !G.player.dead && dist < 2.6) {
       this.holdTimer += dt;
       if (this.holdTimer > WANTED.arrestHoldSec) G.police.bust();
@@ -71,15 +82,15 @@ class Officer {
   }
 }
 
-// Dispatch chatter, one line per star gained, heard as a toast — the bay's
-// police radio gets less polite as the stars climb.
-const RADIO_LINES = [
+// One dispatch line per star, broadcast the moment that star is earned.
+// The radio's manners deteriorate as the count climbs.
+const DISPATCH = [
   '',
-  '📻 Dispatch: "Unit terdekat, cek laporan gangguan di sekitar tersangka."',
-  '📻 Dispatch: "Tersangka terkonfirmasi. Semua unit, waspada."',
-  '📻 Dispatch: "Kejar kendaraannya! Jangan sampai lolos ke jembatan mana pun."',
-  '📻 Dispatch: "Tersangka bersenjata dan berbahaya. Minta tambahan unit!"',
-  '📻 Dispatch: "SELURUH unit kejar tersangka. Ini prioritas kota!"',
+  '📻 Dispatch: "Unit terdekat, periksa laporan gangguan di sekitar tersangka."',
+  '📻 Dispatch: "Tersangka terkonfirmasi. Semua unit harap waspada."',
+  '📻 Dispatch: "Kejar kendaraannya! Jangan biarkan dia lolos dari teluk."',
+  '📻 Dispatch: "Tersangka bersenjata dan berbahaya. Kirim unit tambahan!"',
+  '📻 Dispatch: "SELURUH unit, kejar tersangka. Prioritas tertinggi kota!"',
 ];
 
 export class Police {
@@ -93,27 +104,26 @@ export class Police {
   }
 
   get stars() {
-    const t = WANTED.stars;
-    if (this.heat >= t[5]) return 5;
-    if (this.heat >= t[4]) return 4;
-    if (this.heat >= t[3]) return 3;
-    if (this.heat >= t[2]) return 2;
-    if (this.heat >= t[1]) return 1;
-    return 0;
+    let count = 0;
+    for (let i = 1; i < WANTED.stars.length; i++) {
+      if (this.heat >= WANTED.stars[i]) count = i;
+    }
+    return count;
   }
 
-  setHeat(v) {
-    this.heat = Math.max(0, Math.min(150, v));
+  setHeat(value) {
+    this.heat = Math.max(0, Math.min(150, value));
   }
 
-  addCrime(type, pos) {
-    this.setHeat(this.heat + (WANTED.heatPerCrime[type] || 10));
+  addCrime(kind, _pos) {
+    this.setHeat(this.heat + (WANTED.heatPerCrime[kind] ?? 10));
   }
 
   nearestPoliceDist(pos) {
     let best = Infinity;
-    for (const c of this.cars) best = Math.min(best, Math.hypot(c.pos.x - pos.x, c.pos.z - pos.z));
-    for (const o of this.officers) best = Math.min(best, Math.hypot(o.pos.x - pos.x, o.pos.z - pos.z));
+    for (const unit of [...this.cars, ...this.officers]) {
+      best = Math.min(best, Math.hypot(unit.pos.x - pos.x, unit.pos.z - pos.z));
+    }
     return best;
   }
 
@@ -123,20 +133,22 @@ export class Police {
   }
 
   clearUnits() {
-    for (const c of this.cars) {
-      c.dispose();
-      const i = this.G.vehicles.cars.indexOf(c);
-      if (i >= 0) this.G.vehicles.cars.splice(i, 1);
+    for (const car of this.cars) {
+      car.dispose();
+      const idx = this.G.vehicles.cars.indexOf(car);
+      if (idx >= 0) this.G.vehicles.cars.splice(idx, 1);
     }
     this.cars = [];
-    for (const o of this.officers) o.dispose();
+    for (const officer of this.officers) officer.dispose();
     this.officers = [];
   }
 
+  // A spawn point on the road network, at a ring distance from the player:
+  // far enough not to materialise in view, close enough to matter.
   spawnPoint(minDist, maxDist) {
     const G = this.G;
     const p = G.player.effectivePos();
-    for (let tries = 0; tries < 20; tries++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       const rx = G.rng.pick(ROADS);
       const rz = G.rng.pick(ROADS);
       const x = G.rng.chance(0.5) ? rx : G.rng.float(WORLD.gridMin, WORLD.gridMax);
@@ -153,28 +165,36 @@ export class Police {
       G.audio.setSiren(false, 0);
       return;
     }
-    // heat cools when the player stays out of sight
-    const near = this.nearestPoliceDist(G.player.effectivePos());
-    const decay = near < 60 ? WANTED.decayPerSec : WANTED.decayFarPerSec;
-    // the finale — whichever index it sits at — pins the heat at five stars
-    // for as long as it runs, so the escape can never cool off mid-flight
+    const playerPos = G.player.effectivePos();
+    const nearest = this.nearestPoliceDist(playerPos);
+    // The finale pins the heat: while it runs there is no cooling off.
     const finaleRunning = G.missions.isFinale && !G.missions.available;
-    if (this.stars > 0 && !finaleRunning) this.setHeat(this.heat - decay * dt);
     if (finaleRunning) {
-      // during the final escape the heat stays pinned
       this.setHeat(Math.max(this.heat, WANTED.stars[5]));
+    } else if (this.stars > 0) {
+      const rate = nearest < 60 ? WANTED.decayPerSec : WANTED.decayFarPerSec;
+      this.setHeat(this.heat - rate * dt);
     }
-
-    // radio chatter the moment a new star lands (never on the way down)
     if (this.stars > this.lastStarsHeard) {
-      G.hud.toast(RADIO_LINES[this.stars]);
+      G.hud.toast(DISPATCH[this.stars]);
     }
     this.lastStarsHeard = this.stars;
 
-    const wantCars = Math.min(this.stars, WANTED.maxPoliceCars);
-    if (this.cars.length < wantCars) {
+    this.reconcileCars();
+    this.reconcileOfficers();
+    this.drivePursuit(dt);
+    for (const officer of this.officers) officer.update(dt);
+
+    const sirenLevel = this.cars.length > 0 ? Math.max(0, 1 - nearest / 120) : 0;
+    G.audio.setSiren(this.cars.length > 0, sirenLevel);
+  }
+
+  reconcileCars() {
+    const G = this.G;
+    const wanted = Math.min(this.stars, WANTED.maxPoliceCars);
+    if (this.cars.length < wanted) {
       const spot = this.spawnPoint(55, 95);
-      const car = new Car(G, {
+      const cruiser = new Car(G, {
         name: 'Police',
         color: 0xf0f0f0,
         x: spot.x,
@@ -183,48 +203,32 @@ export class Police {
         police: true,
         maxSpeed: CAR_TUNE.policeMaxSpeed,
       });
-      this.cars.push(car);
-      G.vehicles.cars.push(car);
-    } else if (this.cars.length > wantCars) {
+      this.cars.push(cruiser);
+      G.vehicles.cars.push(cruiser);
+    } else if (this.cars.length > wanted) {
       const extra = this.cars.pop();
       extra.dispose();
-      const i = G.vehicles.cars.indexOf(extra);
-      if (i >= 0) G.vehicles.cars.splice(i, 1);
+      const idx = G.vehicles.cars.indexOf(extra);
+      if (idx >= 0) G.vehicles.cars.splice(idx, 1);
     }
+  }
 
-    const wantOfficers = this.stars >= 2 ? Math.min(this.stars - 1, WANTED.maxOfficers) : 0;
-    if (this.officers.length < wantOfficers) {
+  reconcileOfficers() {
+    const wanted = this.stars >= 2 ? Math.min(this.stars - 1, WANTED.maxOfficers) : 0;
+    if (this.officers.length < wanted) {
       const spot = this.spawnPoint(18, 35);
-      this.officers.push(new Officer(G, spot.x, spot.z));
-    } else if (this.officers.length > wantOfficers) {
+      this.officers.push(new Officer(this.G, spot.x, spot.z));
+    } else if (this.officers.length > wanted) {
       this.officers.pop().dispose();
     }
+  }
 
-    // cruisers chase the player and ram the player's car (gently: a nudge,
-    // not a shove off the road)
+  drivePursuit(dt) {
+    const G = this.G;
     const target = G.player.effectivePos();
     for (const car of this.cars) {
       if (car.formation && G.player.car) {
-        // ride in formation beside the player's car (used by the chase shot)
-        const pc = G.player.car;
-        const fx = Math.sin(pc.heading);
-        const fz = Math.cos(pc.heading);
-        const rx = Math.cos(pc.heading);
-        const rz = -Math.sin(pc.heading);
-        const tx = pc.pos.x + rx * car.formation.right - fx * car.formation.back;
-        const tz = pc.pos.z + rz * car.formation.right - fz * car.formation.back;
-        const dx = tx - car.pos.x;
-        const dz = tz - car.pos.z;
-        const d = Math.hypot(dx, dz);
-        if (d > 25) {
-          car.pos.set(tx, 0, tz);
-        } else {
-          car.pos.x += dx * Math.min(1, dt * 4);
-          car.pos.z += dz * Math.min(1, dt * 4);
-        }
-        car.heading = pc.heading;
-        car.speed = pc.speed;
-        car.syncMesh();
+        this.holdFormation(car, dt);
         continue;
       }
       car.driveTo(target.x, target.z, dt, CAR_TUNE.policeMaxSpeed);
@@ -233,35 +237,55 @@ export class Police {
       car.pos.x = cx;
       car.pos.z = cz;
       car.syncMesh();
+      // Contact with the player's car is a nudge and a speed tax, not a shove.
       if (G.player.car) {
-        const d = Math.hypot(car.pos.x - G.player.car.pos.x, car.pos.z - G.player.car.pos.z);
-        if (d < 3.4) {
-          const dx = G.player.car.pos.x - car.pos.x;
-          const dz = G.player.car.pos.z - car.pos.z;
-          const len = Math.max(0.01, Math.hypot(dx, dz));
-          G.player.car.pos.x += (dx / len) * 0.35;
-          G.player.car.pos.z += (dz / len) * 0.35;
+        const dx = G.player.car.pos.x - car.pos.x;
+        const dz = G.player.car.pos.z - car.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 3.4 && d > 0) {
+          G.player.car.pos.x += (dx / d) * 0.35;
+          G.player.car.pos.z += (dz / d) * 0.35;
           G.player.car.speed *= 0.93;
         }
       }
     }
-    for (const o of this.officers) o.update(dt);
+  }
 
-    const sirenNear = this.cars.length ? Math.max(0, 1 - near / 120) : 0;
-    G.audio.setSiren(this.cars.length > 0, sirenNear);
+  // Formation riding exists for the chase screenshot: the cruiser holds a
+  // fixed offset beside the player's car instead of hunting it.
+  holdFormation(car, dt) {
+    const G = this.G;
+    const lead = G.player.car;
+    const fx = Math.sin(lead.heading);
+    const fz = Math.cos(lead.heading);
+    const rx = Math.cos(lead.heading);
+    const rz = -Math.sin(lead.heading);
+    const tx = lead.pos.x + rx * car.formation.right - fx * car.formation.back;
+    const tz = lead.pos.z + rz * car.formation.right - fz * car.formation.back;
+    const dx = tx - car.pos.x;
+    const dz = tz - car.pos.z;
+    if (Math.hypot(dx, dz) > 25) {
+      car.pos.set(tx, 0, tz);
+    } else {
+      car.pos.x += dx * Math.min(1, dt * 4);
+      car.pos.z += dz * Math.min(1, dt * 4);
+    }
+    car.heading = lead.heading;
+    car.speed = lead.speed;
+    car.syncMesh();
   }
 
   bust() {
     const G = this.G;
     const fine = Math.floor(G.player.cash * 0.1);
     G.player.cash -= fine;
-    const spot = G.city.places.safehouse;
     if (G.player.car) {
       G.player.car = null;
       G.player.onFoot = true;
       G.player.mesh.visible = true;
     }
-    G.player.pos.set(spot.x, 0, spot.z);
+    const safehouse = G.city.places.safehouse;
+    G.player.pos.set(safehouse.x, 0, safehouse.z);
     G.player.mesh.position.copy(G.player.pos);
     this.setHeat(0);
     this.clearUnits();

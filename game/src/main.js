@@ -1,5 +1,9 @@
-// Neon Bay — boot, wiring and the fixed-feel game loop.
-// The world is built from the modules in src/; this file only assembles them.
+// main.js — boot and wiring. It creates the renderer, scene and camera,
+// instantiates every module around one shared state object G, and runs
+// the frame loop. Modules read each other through G (G.player, G.police,
+// G.hud, ...), which keeps imports one-directional: only main.js knows
+// the whole cast. G also carries the mode, the clock, the autosave timer
+// and the screenshot hooks (window.__game, window.__shotReady).
 import * as THREE from 'three';
 import { Rng } from './random.js';
 import { Input } from './input.js';
@@ -34,13 +38,13 @@ scene.fog = new THREE.Fog(PALETTE.fog, 160, 720);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1200);
 camera.position.set(0, 85, 190);
 
-const hemi = new THREE.HemisphereLight(0xffd9b0, 0x3a3348, 0.95);
-scene.add(hemi);
+scene.add(new THREE.HemisphereLight(0xffd9b0, 0x3a3348, 0.95));
 const sun = new THREE.DirectionalLight(PALETTE.sun, 1.6);
 sun.position.set(-180, 90, -120);
 scene.add(sun);
 
-// low sun disc on the western horizon + a few drifting clouds
+// A low sun disc hangs over the western horizon; flat cloud cards drift
+// above the rooftops. Both are pure decoration — cheap and cheerful.
 const sunDisc = new THREE.Mesh(
   new THREE.CircleGeometry(34, 32),
   new THREE.MeshBasicMaterial({ color: 0xffe9b0, fog: false }),
@@ -56,7 +60,6 @@ for (let i = 0; i < 9; i++) {
   scene.add(cloud);
 }
 
-// --- the shared game state every module reads ---
 const G = {
   scene,
   camera,
@@ -82,13 +85,12 @@ const G = {
   shotReadyAt: null,
   saveTimer: 0,
   nextPedLineAt: 0,
-  // default auto-drive route: a rectangle loop around the city grid
+  // Default auto-drive route (screenshot staging): a rectangle of the grid.
   autoWaypoints: [[0, 180], [180, 180], [180, -180], [-180, -180], [-180, 180], [0, 180]],
 };
 
 G.city = buildCity(G);
-G.vehicles.cars.push(...spawnTraffic(G, lowfx ? 10 : 14));
-G.vehicles.cars.push(...spawnParked(G));
+G.vehicles.cars.push(...spawnTraffic(G, lowfx ? 10 : 14), ...spawnParked(G));
 G.pedestrians = new Pedestrians(G);
 G.pedestrians.spawn(lowfx ? 16 : 26);
 G.player = new Player(G);
@@ -134,9 +136,11 @@ G.startGame = (continueSave) => {
   G.hud.hideStart();
   if (document.pointerLockElement !== canvas) {
     try {
-      const p = canvas.requestPointerLock();
-      if (p && p.catch) p.catch(() => {});
-    } catch (_) {}
+      const lock = canvas.requestPointerLock();
+      if (lock && lock.catch) lock.catch(() => {});
+    } catch {
+      // pointer lock refused: the game still plays, the camera just won't steer
+    }
   }
 };
 
@@ -146,19 +150,17 @@ G.togglePause = () => {
   G.hud.toast(G.paused ? 'Jeda — tekan P untuk lanjut.' : 'Lanjut!');
 };
 
-// expose the debug/test surface the CDP harness reads
+// The harness surface: the whole state, plus the shot-ready flag.
 window.__game = G;
 window.__shotReady = false;
 
-const startSave = loadSave();
+const existingSave = loadSave();
 G.hud.setObjective(G.missions.objectiveText());
-G.hud.showStart(!!startSave, startSave);
+G.hud.showStart(Boolean(existingSave), existingSave);
 document.getElementById('game-title').textContent = STORY.title;
 document.getElementById('game-tagline').textContent = STORY.tagline;
 
-if (shotName) {
-  applyShot(G, shotName);
-}
+if (shotName) applyShot(G, shotName);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -166,9 +168,11 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// The loop: simulation only while playing and unpaused; the camera and
+// HUD stay alive in the menu so the start screen sits over a living city.
 const clock = new THREE.Clock();
-function loop() {
-  requestAnimationFrame(loop);
+function frame() {
+  requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.1);
   G.time += dt;
   if (G.mode === 'playing' && !G.paused) {
@@ -186,7 +190,6 @@ function loop() {
       G.saveGame();
     }
   } else {
-    // menu / paused: keep the camera alive, keep the HUD fresh
     G.player.updateCamera(dt);
   }
   G.hud.update(dt);
@@ -195,4 +198,4 @@ function loop() {
   }
   renderer.render(scene, camera);
 }
-loop();
+frame();

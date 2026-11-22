@@ -1,25 +1,28 @@
-// HUD: cash, health, wanted stars, objective line, speedometer, a live
-// top-down minimap, dialogue box, toasts, the side-activity status line,
-// the district banner that names the quarter you just drove into, and the
-// start / wasted / complete screens.
-import { DISTRICTS, MISSIONS, STORY, CONTROLS } from './config.js';
+// hud.js — everything drawn over the 3D world: cash, health, wanted
+// stars, objective line, speedometer, dialogue/toast popups, the district
+// banner, the activity status line, the start/wasted/complete screens,
+// and the live minimap (a 2D canvas redrawn each frame: water, park,
+// district tints, roads, then dots for traffic, shells, enemies, police,
+// targets and the player arrow). Rarely-changing DOM writes are cached.
+import { DISTRICTS, MISSIONS, CONTROLS } from './config.js';
 
-const MAP_SIZE = 220;
-const WORLD_SPAN = 620; // world -310..310 maps onto the canvas
+const MAP_PX = 220;
+const MAP_WORLD = 620; // world coordinates -310..310 fill the canvas
+
+const ELEMENT_IDS = [
+  'hud', 'hud-cash', 'hud-health-fill', 'hud-stars', 'hud-objective',
+  'hud-speed', 'hud-mission-btn', 'dialog', 'dialog-speaker', 'dialog-text',
+  'toast', 'screen-start', 'btn-start', 'btn-continue', 'screen-wasted',
+  'screen-complete', 'btn-complete', 'minimap', 'start-controls',
+  'start-save-note', 'crosshair', 'hud-activity', 'hud-district',
+  'start-districts',
+];
 
 export class HUD {
   constructor(G) {
     this.G = G;
     this.el = {};
-    for (const id of [
-      'hud', 'hud-cash', 'hud-health-fill', 'hud-stars', 'hud-objective',
-      'hud-speed', 'hud-mission-btn', 'dialog', 'dialog-speaker', 'dialog-text',
-      'toast', 'screen-start', 'btn-start', 'btn-continue', 'screen-wasted',
-      'screen-complete', 'btn-complete', 'minimap', 'start-controls', 'start-save-note',
-      'crosshair', 'hud-activity', 'hud-district', 'start-districts',
-    ]) {
-      this.el[id] = document.getElementById(id);
-    }
+    for (const id of ELEMENT_IDS) this.el[id] = document.getElementById(id);
     this.mapCtx = this.el['minimap'].getContext('2d');
     this.dialogTimer = 0;
     this.toastTimer = 0;
@@ -27,27 +30,27 @@ export class HUD {
     this.lastStars = -1;
     this.lastCash = -1;
     this.lastActivity = '';
-    this.buildControlsList();
-    this.buildDistrictChips();
+    this.renderControls();
+    this.renderDistrictChips();
     this.el['btn-start'].addEventListener('click', () => this.G.startGame(false));
     this.el['btn-continue'].addEventListener('click', () => this.G.startGame(true));
     this.el['hud-mission-btn'].addEventListener('click', () => this.G.missions.tryStartNext());
     this.el['btn-complete'].addEventListener('click', () => this.showComplete(false));
   }
 
-  buildControlsList() {
-    this.el['start-controls'].innerHTML = CONTROLS.map(
-      ([k, v]) => `<div class="ctl"><span class="key">${k}</span><span>${v}</span></div>`,
-    ).join('');
+  renderControls() {
+    this.el['start-controls'].innerHTML = CONTROLS
+      .map(([key, action]) => `<div class="ctl"><span class="key">${key}</span><span>${action}</span></div>`)
+      .join('');
   }
 
-  buildDistrictChips() {
-    // the start screen advertises the quarters the story now travels to
-    const el = this.el['start-districts'];
-    if (!el) return;
-    el.innerHTML = DISTRICTS.map(
-      (d) => `<div class="district-chip" style="color:${d.banner}">${d.name}<small>${d.motto}</small></div>`,
-    ).join('');
+  renderDistrictChips() {
+    // The start screen advertises the three quarters the story travels to.
+    const host = this.el['start-districts'];
+    if (!host) return;
+    host.innerHTML = DISTRICTS
+      .map((d) => `<div class="district-chip" style="color:${d.banner}">${d.name}<small>${d.motto}</small></div>`)
+      .join('');
   }
 
   setObjective(text) {
@@ -110,39 +113,32 @@ export class HUD {
 
   update(dt) {
     const G = this.G;
-    const P = G.player;
-    if (this.dialogTimer > 0) {
-      this.dialogTimer -= dt;
-      if (this.dialogTimer <= 0) this.el['dialog'].classList.add('hidden');
+    const player = G.player;
+    // Timed popups count down and dismiss themselves.
+    this.dialogTimer = this.tick(this.dialogTimer, dt, () => this.el['dialog'].classList.add('hidden'));
+    this.toastTimer = this.tick(this.toastTimer, dt, () => this.el['toast'].classList.add('hidden'));
+    this.districtTimer = this.tick(this.districtTimer, dt, () => this.el['hud-district'].classList.add('hidden'));
+
+    if (player.cash !== this.lastCash) {
+      this.lastCash = player.cash;
+      this.el['hud-cash'].textContent = `$${player.cash}`;
     }
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0) this.el['toast'].classList.add('hidden');
-    }
-    if (this.districtTimer > 0) {
-      this.districtTimer -= dt;
-      if (this.districtTimer <= 0) this.el['hud-district'].classList.add('hidden');
-    }
-    if (P.cash !== this.lastCash) {
-      this.lastCash = P.cash;
-      this.el['hud-cash'].textContent = `$${P.cash}`;
-    }
-    this.el['hud-health-fill'].style.width = `${Math.max(0, P.health)}%`;
+    this.el['hud-health-fill'].style.width = `${Math.max(0, player.health)}%`;
     const stars = G.police.stars;
     if (stars !== this.lastStars) {
       this.lastStars = stars;
       this.el['hud-stars'].textContent = '★'.repeat(stars) + '☆'.repeat(5 - stars);
       this.el['hud-stars'].classList.toggle('hot', stars > 0);
     }
-    if (!P.onFoot && P.car) {
-      const kmh = Math.round(Math.abs(P.car.speed) * 3.6);
-      const kind = P.car.kindLabel ? ` · ${P.car.kindLabel}` : '';
+    if (!player.onFoot && player.car) {
+      const kmh = Math.round(Math.abs(player.car.speed) * 3.6);
+      const kind = player.car.kindLabel ? ` · ${player.car.kindLabel}` : '';
       this.el['hud-speed'].textContent = `${kmh} km/h${kind}`;
       this.el['hud-speed'].classList.remove('hidden');
     } else {
       this.el['hud-speed'].classList.add('hidden');
     }
-    this.el['crosshair'].classList.toggle('hidden', !(G.mode === 'playing' && P.onFoot && !P.dead));
+    this.el['crosshair'].classList.toggle('hidden', !(G.mode === 'playing' && player.onFoot && !player.dead));
     if (G.activities) {
       const status = G.activities.statusText();
       if (status !== this.lastActivity) {
@@ -153,44 +149,49 @@ export class HUD {
     this.drawMinimap();
   }
 
+  tick(timer, dt, onExpire) {
+    if (timer <= 0) return timer;
+    const next = timer - dt;
+    if (next <= 0) onExpire();
+    return next;
+  }
+
   drawMinimap() {
     const G = this.G;
     const ctx = this.mapCtx;
-    const s = MAP_SIZE / WORLD_SPAN;
-    const toMap = (x, z) => [(x + WORLD_SPAN / 2) * s, (z + WORLD_SPAN / 2) * s];
+    const scale = MAP_PX / MAP_WORLD;
+    const toMap = (x, z) => [(x + MAP_WORLD / 2) * scale, (z + MAP_WORLD / 2) * scale];
     ctx.fillStyle = '#101018';
-    ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
-    // bay water to the east
-    const [wx] = toMap(300, 0);
+    ctx.fillRect(0, 0, MAP_PX, MAP_PX);
+    // The bay: everything east of the shoreline is water.
+    const [shoreX] = toMap(300, 0);
     ctx.fillStyle = '#1d5f7a';
-    ctx.fillRect(wx, 0, MAP_SIZE - wx, MAP_SIZE);
-    // park
+    ctx.fillRect(shoreX, 0, MAP_PX - shoreX, MAP_PX);
+    // The park block.
     ctx.fillStyle = '#2d5a33';
-    const [px, py] = toMap(-22, -22);
-    ctx.fillRect(px, py, 44 * s, 44 * s);
-    // districts as soft tinted quarters, each in its accent colour
-    if (G.city.districts) {
-      for (const d of G.city.districts) {
-        const [dx, dy] = toMap(d.minX, d.minZ);
-        ctx.fillStyle = `#${d.accent.toString(16).padStart(6, '0')}2e`;
-        ctx.fillRect(dx, dy, (d.maxX - d.minX) * s, (d.maxZ - d.minZ) * s);
-      }
+    const [parkX, parkY] = toMap(-22, -22);
+    ctx.fillRect(parkX, parkY, 44 * scale, 44 * scale);
+    // District quarters, tinted with each district's accent at low alpha.
+    for (const d of G.city.districts ?? []) {
+      const [dx, dy] = toMap(d.minX, d.minZ);
+      ctx.fillStyle = `#${d.accent.toString(16).padStart(6, '0')}2e`;
+      ctx.fillRect(dx, dy, (d.maxX - d.minX) * scale, (d.maxZ - d.minZ) * scale);
     }
-    // roads
+    // Roads as a light grid.
     ctx.strokeStyle = '#55555f';
     ctx.lineWidth = 4;
     for (const r of G.cityRoads) {
-      const [x1, y1] = toMap(r, -270);
-      const [x2, y2] = toMap(r, 270);
+      const [vx, vyTop] = toMap(r, -270);
+      const [, vyBot] = toMap(r, 270);
       ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+      ctx.moveTo(vx, vyTop);
+      ctx.lineTo(vx, vyBot);
       ctx.stroke();
-      const [x3, y3] = toMap(-270, r);
-      const [x4, y4] = toMap(270, r);
+      const [hxLeft, hy] = toMap(-270, r);
+      const [hxRight] = toMap(270, r);
       ctx.beginPath();
-      ctx.moveTo(x3, y3);
-      ctx.lineTo(x4, y4);
+      ctx.moveTo(hxLeft, hy);
+      ctx.lineTo(hxRight, hy);
       ctx.stroke();
     }
     const dot = (x, z, r, color) => {
@@ -200,61 +201,47 @@ export class HUD {
       ctx.arc(mx, my, r, 0, Math.PI * 2);
       ctx.fill();
     };
-    // traffic
+    const diamond = (x, z, r, color) => {
+      const [mx, my] = toMap(x, z);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(mx, my - r);
+      ctx.lineTo(mx + r * 0.8, my);
+      ctx.lineTo(mx, my + r);
+      ctx.lineTo(mx - r * 0.8, my);
+      ctx.closePath();
+      ctx.fill();
+    };
     for (const car of G.vehicles.cars) {
-      if (car.police || car.parked) continue;
-      dot(car.pos.x, car.pos.z, 2, '#9a9aa8');
+      if (!car.police && !car.parked) dot(car.pos.x, car.pos.z, 2, '#9a9aa8');
     }
-    // parked / mission cars (the taxi gets its own cab-yellow dot)
     for (const car of G.vehicles.cars) {
       if (!car.parked || !car.marker) continue;
       const color = car.marker === 'sedan' ? '#ff4444' : car.marker === 'taxi' ? '#f2b134' : '#c26aff';
       dot(car.pos.x, car.pos.z, 3, color);
     }
-    // uncollected neon shells
     if (G.activities) {
       for (const shell of G.activities.shells) {
         if (!shell.taken) dot(shell.x, shell.z, 2.2, '#ff4fd8');
       }
     }
-    // enemies
-    for (const e of G.enemies) {
-      if (!e.dead) dot(e.pos.x, e.pos.z, 3, '#ff2222');
+    for (const enemy of G.enemies) {
+      if (!enemy.dead) dot(enemy.pos.x, enemy.pos.z, 3, '#ff2222');
     }
-    // police
-    for (const c of G.police.cars) dot(c.pos.x, c.pos.z, 3, '#4488ff');
-    // side-activity marker (taxi target or next race gate), cyan diamond
-    const actObj = G.activities ? G.activities.markerPos() : null;
-    if (actObj) {
-      const [mx, my] = toMap(actObj.x, actObj.z);
-      ctx.fillStyle = '#33e0ff';
-      ctx.beginPath();
-      ctx.moveTo(mx, my - 5);
-      ctx.lineTo(mx + 4, my);
-      ctx.lineTo(mx, my + 5);
-      ctx.lineTo(mx - 4, my);
-      ctx.closePath();
-      ctx.fill();
+    for (const cruiser of G.police.cars) dot(cruiser.pos.x, cruiser.pos.z, 3, '#4488ff');
+    // Activity target: a steady cyan diamond.
+    const actTarget = G.activities ? G.activities.markerPos() : null;
+    if (actTarget) diamond(actTarget.x, actTarget.z, 5, '#33e0ff');
+    // Mission objective: a gold diamond that breathes.
+    const objective = G.missions.objectivePos();
+    if (objective && G.missions.active) {
+      diamond(objective.x, objective.z, 4 + Math.sin(G.time * 4) * 1.5 + 2, '#ffd23b');
     }
-    // mission marker (pulsing gold diamond)
-    const obj = G.missions.objectivePos();
-    if (obj && G.missions.active) {
-      const pulse = 4 + Math.sin(G.time * 4) * 1.5;
-      const [mx, my] = toMap(obj.x, obj.z);
-      ctx.fillStyle = '#ffd23b';
-      ctx.beginPath();
-      ctx.moveTo(mx, my - pulse - 2);
-      ctx.lineTo(mx + pulse, my);
-      ctx.lineTo(mx, my + pulse + 2);
-      ctx.lineTo(mx - pulse, my);
-      ctx.closePath();
-      ctx.fill();
-    }
-    // player arrow
+    // The player: a white arrow rotated to heading.
     const p = G.player.effectivePos();
-    const [mx, my] = toMap(p.x, p.z);
+    const [px, py] = toMap(p.x, p.z);
     ctx.save();
-    ctx.translate(mx, my);
+    ctx.translate(px, py);
     ctx.rotate(G.player.heading);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
